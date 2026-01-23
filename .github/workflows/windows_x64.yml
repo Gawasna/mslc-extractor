@@ -50,8 +50,6 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
-          
-          # Đặt tên file chuyên nghiệp: mslc-extractor-v0.1.0-win-x64.zip
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "manual" }
           $zipName = "mslc-extractor-$tag-win-x64.zip"
           $zipPath = Join-Path $out $zipName
