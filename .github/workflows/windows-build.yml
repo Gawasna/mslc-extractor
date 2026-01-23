@@ -1,0 +1,81 @@
+name: Build x64 Release (Windows + Attest)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore Native.sln
+
+      - name: Build solution (x64 Release)
+        shell: pwsh
+        run: msbuild Native.sln /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Create SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          if (-not (Test-Path $out)) { Write-Error "Output folder not found: $out"; exit 1 }
+          $sumfile = Join-Path $out "SHA256SUMS.txt"
+          Get-ChildItem -Path $out -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' } |
+            Sort-Object Name |
+            ForEach-Object {
+              $h = Get-FileHash $_.FullName -Algorithm SHA256
+              "{0}  {1}" -f $h.Hash, $_.Name
+            } | Out-File -FilePath $sumfile -Encoding ASCII
+          Write-Host "Checksums written to $sumfile"
+          Get-Content $sumfile
+
+      - name: Package release artifacts (zip)
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          $zip = Join-Path $out 'release-artifacts.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -Force
+          Write-Host "Created $zip"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            x64/Release/Loader.exe
+            x64/Release/HookCore.dll
+            x64/Release/SHA256SUMS.txt
+
+      - name: Upload build artifact (Actions UI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: x64/Release/release-artifacts.zip
+
+      - name: Create GitHub release (from tag) and attach zip
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: ncipollo/release-action@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Built by workflow run:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          artifacts: x64/Release/release-artifacts.zip
+          draft: false
+          prerelease: false

@@ -1,0 +1,8 @@
+.vs/
+*.tlog
+packages/
+*.user
+*.filters
+x64/
+Release/
+Debug/
