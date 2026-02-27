@@ -1,61 +1,124 @@
 #include "pch.h"
 #include <Windows.h>
 #include <string>
+#include <fstream>
+#include <vector>
+#include <Psapi.h>
+#include <algorithm> 
 #include "MinHook.h"
 
-// Offset trỏ tới địa chỉ chuỗi văn bản trong memory của Engine
-#define TEXT_OFFSET 0x190
-
-typedef void* (__fastcall* GetDisplayText_t)(void* rcx, void* rdx, void* r8);
-GetDisplayText_t fpOriginalGetDisplayText = nullptr;
-
-// Gửi snapshot qua Pipe (Kết nối ngắn hạn để tối ưu độ ổn định)
-void SendToPipe(const std::wstring& text) {
-    if (text.empty()) return;
-
-    HANDLE hPipe = CreateFileW(L"\\\\.\\pipe\\LiveCaptionPipe", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-    if (hPipe != INVALID_HANDLE_VALUE) {
-        DWORD written;
-        WriteFile(hPipe, text.c_str(), (DWORD)(text.length() + 1) * sizeof(wchar_t), &written, NULL);
-        CloseHandle(hPipe);
+// =============================================================
+// LOGGER RA FILE
+// =============================================================
+void LogToFile(const std::string& msg) {
+    std::ofstream logFile("C:\\Users\\Public\\live_caption_debug.txt", std::ios_base::app);
+    if (logFile.is_open()) {
+        logFile << "[HookCore] " << msg << std::endl;
+        logFile.close();
     }
 }
 
-void* __fastcall Detour_GetDisplayText(void* rcx, void* rdx, void* r8) {
-    void* result = fpOriginalGetDisplayText(rcx, rdx, r8);
+// =============================================================
+// HELPER MỚI: TÌM MODULE CHỦ ĐỘNG (Thay thế GetModuleHandle)
+// =============================================================
+HMODULE FindModuleByPartialName(const std::string& partialName) {
+    HMODULE hMods[1024];
+    DWORD cbNeeded;
+    HANDLE hProcess = GetCurrentProcess();
 
-    if (rcx != nullptr) {
-        wchar_t** ppText = (wchar_t**)((char*)rcx + TEXT_OFFSET);
-        if (ppText && *ppText && !IsBadReadPtr(*ppText, 2)) {
-            std::wstring currentText(*ppText);
-            static std::wstring lastSentText = L"";
+    if (EnumProcessModules(hProcess, hMods, sizeof(hMods), &cbNeeded)) {
+        for (unsigned int i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
+            TCHAR szModName[MAX_PATH];
+            if (GetModuleFileNameEx(hProcess, hMods[i], szModName, sizeof(szModName) / sizeof(TCHAR))) {
+                std::wstring wName(szModName);
+                std::string sName(wName.begin(), wName.end());
 
-            if (currentText != lastSentText) {
-                SendToPipe(currentText);
-                lastSentText = currentText;
+                std::string sNameLower = sName;
+                std::transform(sNameLower.begin(), sNameLower.end(), sNameLower.begin(), ::tolower);
+
+                std::string partialNameLower = partialName;
+                std::transform(partialNameLower.begin(), partialNameLower.end(), partialNameLower.begin(), ::tolower);
+
+                if (sNameLower.find(partialNameLower) != std::string::npos) {
+                    return hMods[i];
+                }
             }
         }
     }
-    return result;
+    return nullptr;
+}
+
+// =============================================================
+// CORE LOGIC
+// =============================================================
+typedef void* SPXRESULTHANDLE;
+typedef int(__stdcall* result_get_text_t)(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
+result_get_text_t fpOriginalResultGetText = nullptr;
+
+// Hook Function
+int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen) {
+    int ret = fpOriginalResultGetText(hresult, buffer, bufferLen);
+
+    if (ret == 0 && buffer != nullptr && buffer[0] != '\0') {
+        LogToFile("CAPTURED TEXT: " + std::string(buffer));
+    }
+    return ret;
 }
 
 DWORD WINAPI HookThread(LPVOID lpParam) {
-    const wchar_t* targetDll = L"microsoft.cognitiveservices.speech.extension.embedded.sr.runtime.dll";
-    HMODULE hModule = nullptr;
-    while ((hModule = GetModuleHandleW(targetDll)) == nullptr) Sleep(500);
+    LogToFile("Thread started. Hunting for Core DLL Handle...");
 
-    // Function đích chịu trách nhiệm render text ra UI của Live Captions
-    FARPROC pFunc = GetProcAddress(hModule, "GetUnimicDecoderNBestDisplayText");
-    if (pFunc && MH_Initialize() == MH_OK) {
-        MH_CreateHook((LPVOID)pFunc, &Detour_GetDisplayText, (LPVOID*)&fpOriginalGetDisplayText);
-        MH_EnableHook(MH_ALL_HOOKS);
+    HMODULE hModule = nullptr;
+    int retry = 0;
+    while (hModule == nullptr && retry < 20) {
+        hModule = FindModuleByPartialName("microsoft.cognitiveservices.speech.core.dll");
+        if (hModule == nullptr) {
+            Sleep(1000);
+            LogToFile("Scanning for DLL... Retry " + std::to_string(retry));
+        }
+        retry++;
     }
+
+    if (hModule == nullptr) {
+        LogToFile("FATAL: Could not find handle for Core DLL even via EnumProcessModules.");
+        return 0;
+    }
+
+    LogToFile("SUCCESS: Core DLL Handle found at: " + std::to_string((unsigned long long)hModule));
+
+    // Get func address
+    FARPROC pFunc = GetProcAddress(hModule, "result_get_text");
+
+    if (pFunc) {
+        LogToFile("Function 'result_get_text' found at: " + std::to_string((unsigned long long)pFunc));
+
+        if (MH_Initialize() == MH_OK) {
+            MH_CreateHook((LPVOID)pFunc, &Detour_result_get_text, (LPVOID*)&fpOriginalResultGetText);
+            if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) {
+                LogToFile("HOOK ENABLED! Waiting for subtitles...");
+            }
+            else {
+                LogToFile("ERROR: MH_EnableHook Failed");
+            }
+        }
+        else {
+            LogToFile("ERROR: MH_Initialize Failed");
+        }
+    }
+    else {
+        LogToFile("ERROR: 'result_get_text' not found by GetProcAddress. Dumping exports might be needed.");
+    }
+
     return 0;
 }
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD r, LPVOID v) {
-    if (r == DLL_PROCESS_ATTACH) {
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
+        std::ofstream logFile("C:\\Users\\Public\\live_caption_debug.txt", std::ios_base::trunc);
+        logFile << "[HookCore] New Session Started" << std::endl;
+        logFile.close();
+
         CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)HookThread, NULL, 0, NULL);
     }
     return TRUE;
