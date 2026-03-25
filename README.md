@@ -1,35 +1,58 @@
 # Live Caption Extractor (MSLC Extractor)
 
 **Project Overview**
-- **Description**: Native Windows injector + hook that extracts Live Captions text from the Microsoft Live Captions engine by hooking the core speech recognition API and logging output to file with optional real-time console display.
+- **Description**: Native Windows injector + hook that extracts Live Captions text from the Microsoft Live Captions engine by hooking the Azure Speech SDK core API and displaying real-time captions in a split-view console UI.
 - **Components**: 
-  - **Loader** (injector + console UI with Named Pipe listener)
-  - **HookCore** (DLL that hooks the core speech recognition function)
+  - **Loader** (injector + split-view console UI with Named Pipe server)
+  - **HookCore** (DLL that hooks Azure Speech SDK result APIs)
 
 ## How it Works
 
 ### Injection Process
 - **Loader** locates `LiveCaptions.exe` (or opens Live Captions settings if not running)
+- Sets DACL permissions on `HookCore.dll` for AppContainer sandbox compatibility
 - Injects `HookCore.dll` into the target process via `CreateRemoteThread` + `LoadLibraryW`
-- Sets proper DACL permissions for AppContainer execution before injection
+- Starts Named Pipe server (`\\.\pipe\LiveCaptionPipe`) with NULL DACL for IPC
 
-### Hooking Mechanism (Core API Approach)
+### Hooking Mechanism (Azure Speech SDK API)
 - **HookCore** actively scans for `microsoft.cognitiveservices.speech.core.dll` using `EnumProcessModules`
-- Locates the export `result_get_text` (core speech recognition API)
-- Installs a MinHook detour to intercept caption text at the API level
+- Locates two exports from Azure Speech SDK:
+  - `result_get_text` - retrieves recognized text buffer
+  - `result_get_reason` - queries recognition state (partial vs final)
+- Installs MinHook detour on `result_get_text` to intercept all caption text
 - Implements retry mechanism (20 attempts with 1-second intervals) for module detection
 
 ### Data Flow
 1. **Capture**: Detour intercepts `result_get_text` calls with recognized text buffer (`char*`)
-2. **Logging**: Captured text is written to `C:\Users\Public\live_caption_debug.txt` with timestamps
-3. **Pipe Communication** (Optional): Text can be sent via Named Pipe `\\.\pipe\LiveCaptionPipe` to Loader
-4. **Console Display**: Loader renders real-time captions with `[Partial]` and `[FINAL]` tags
+2. **State Detection**: Queries `result_get_reason` to determine if result is partial (`ResultReason_RecognizingSpeech`) or final (`ResultReason_RecognizedSpeech`)
+3. **Logging**: Captured text is written to `C:\Users\Public\live_caption_debug.txt` with ISO 8601 timestamps
+4. **Pipe Communication**: JSON payload sent via persistent Named Pipe connection to Loader
+   - Format: `{"text":"...","is_final":true/false,"bytes":N,"ts_ms":T}`
+   - Persistent connection (no reconnect per packet) to preserve splitter state
+5. **Console Display**: Loader renders captions in split-view UI:
+   - **Left panel**: Live stream with `[~]` (partial) and `[F]` (final) tags
+   - **Center panel**: Confirmed sentences extracted via delta watermark splitter
+   - **Right panel**: Real-time statistics (packet count, bytes, latency, timestamp)
 
 ### Key Implementation Details
+
+**HookCore (DLL)**:
 - **Hook Target**: `result_get_text` function (stdcall convention)
 - **Function Signature**: `int __stdcall result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen)`
 - **Module Discovery**: Dynamic scanning via `FindModuleByPartialName()` instead of passive `GetModuleHandle()`
 - **Text Format**: Narrow strings (`char*`) from core API, not wide strings from UI layer
+- **Pipe Strategy**: Persistent connection with lazy reconnect on write failure (prevents splitter reset)
+- **Thread Safety**: `CRITICAL_SECTION` guards pipe handle against concurrent hook calls
+
+**Loader (Console UI)**:
+- **Split-View Layout**: 3-column design with box-drawing characters (Unicode U+2502, U+2500, U+253C)
+- **Sentence Splitter**: Delta watermark algorithm to prevent duplicate sentences
+  - Tracks `confirmed_len` (chars already committed to Confirmed panel)
+  - Scans only new suffix `[confirmed_len .. end]` for sentence boundaries (`.?!`)
+  - Handles fast speech (multi-sentence batches) without duplication
+  - Resets watermark on FINAL or regression detection
+- **Logging**: Rolling window (100 lines max) written to `C:\Users\Public\loader_debug.txt`
+- **Latency Tracking**: Measures pipe delay via `GetTickCount64()` delta (HookCore capture → Loader receive)
 
 ## Security & Privacy
 
@@ -86,12 +109,21 @@ cd .\x64\Release\
 3. **Expected Behavior**:
    - If `LiveCaptions.exe` is not running, Loader will open Live Captions settings and wait
    - Once detected, HookCore.dll will be injected
-   - Console will display real-time captions:
+   - Console will display split-view UI:
      ```
-     [Partial]: text being recognized...
-     [FINAL]: completed sentence here.
+     ┌─────────────────────────────────────────────┬─────────────────────────────────────────────┬──────────────────────────┐
+     │              LIVE STREAM                    │         CONFIRMED SENTENCES                 │          STATS           │
+     ├─────────────────────────────────────────────┼─────────────────────────────────────────────┼──────────────────────────┤
+     │ [~] text being recognized...                │ 1. This is a complete sentence.             │ Pkts  : 42               │
+     │ [F] completed sentence here.                │ 2. Another confirmed sentence.              │ Bytes : 1024             │
+     │                                             │                                             │ Avg   : 24 B             │
+     │                                             │                                             │ Delay : 15 ms            │
+     │                                             │                                             │ Last  : 12:34:56         │
+     └─────────────────────────────────────────────┴─────────────────────────────────────────────┴──────────────────────────┘
      ```
-   - Debug log will be written to `C:\Users\Public\live_caption_debug.txt`
+   - Debug logs:
+     - HookCore: `C:\Users\Public\live_caption_debug.txt` (ISO 8601 timestamps)
+     - Loader: `C:\Users\Public\loader_debug.txt` (rolling 100-line window)
 
 ### Troubleshooting
 
@@ -103,42 +135,72 @@ cd .\x64\Release\
 **No Captions Captured**:
 - Verify `live_caption_debug.txt` for diagnostic messages
 - Check if Live Captions is actively transcribing audio
-- Ensure correct DLL is being loaded (check log for "SUCCESS: Core DLL Handle found")
+- Ensure correct DLL is being loaded (check log for "Core DLL handle found")
+- Verify `result_get_text` and `result_get_reason` exports are resolved
 
 **Module Not Found**:
 - The DLL scan runs 20 times with 1-second intervals
 - If still failing, Windows may have updated the core DLL name/structure
+- Check log for "Could not find Core DLL handle after all retries"
+
+**Duplicate Sentences**:
+- Check `loader_debug.txt` for splitter watermark progression
+- Verify splitter is not resetting mid-utterance (look for "REGRESSION detected")
+- Ensure pipe connection is persistent (no "Pipe write failed" errors in HookCore log)
 
 ## Approach Justification
 
-### HookCore Settings (dllmain.cpp)
+### HookCore Configuration (dllmain.cpp)
 
-- **Target DLL**: `microsoft.cognitiveservices.speech.core.dll`
-  - Modify in `FindModuleByPartialName()` call if Microsoft changes the DLL name
-  
-- **Target Function**: `result_get_text`
-  - Update in `GetProcAddress()` call if API signature changes
+**Constants** (top of file):
+- `LOG_PATH`: HookCore debug log location (default: `C:\Users\Public\live_caption_debug.txt`)
+- `PIPE_NAME`: Named Pipe endpoint (default: `\\.\pipe\LiveCaptionPipe`)
+- `MODULE_SCAN_RETRIES`: Max attempts to find core DLL (default: 20)
+- `MODULE_SCAN_INTERVAL`: Delay between scans in ms (default: 1000)
 
-## Architecture Changes (v33fd07c)
+**Target DLL**: `microsoft.cognitiveservices.speech.core.dll`
+- Modify in `FindModuleByPartialName()` call if Microsoft changes the DLL name
 
-This version represents a **major architectural shift**:
+**Target Functions**:
+- `result_get_text` - hooked to intercept text buffer
+- `result_get_reason` - called (not hooked) to query recognition state
+- Update in `GetProcAddress()` calls if API signature changes
 
-**Previous Approach** (UI Hooking):
+### Loader Configuration (Loader.cpp)
+
+**Panel Layout** (top of file):
+- `COL_LIVE_W`: Live stream panel width in chars (default: 46)
+- `COL_CONFIRM_W`: Confirmed sentences panel width (default: 46)
+- `COL_STATS_W`: Stats panel width (default: 26)
+- `CONSOLE_H`: Console height in rows (default: 40)
+
+**Sentence Splitter**:
+- `BOUNDARIES`: Punctuation chars for sentence splitting (default: `.?!`)
+- Modify in `SentenceSplitter::BOUNDARIES` if you want to include/exclude punctuation
+
+## Architecture Evolution
+
+### v1: UI Layer Hooking (Deprecated)
 - Hooked `GetUnimicDecoderNBestDisplayText` from runtime DLL
 - Extracted text from memory offset (`TEXT_OFFSET 0x190`)
 - Wide string (`wchar_t*`) handling
+- Fragile: broke on Windows updates
 
-**Current Approach** (Core API Hooking):
-- Hooks `result_get_text` from core speech DLL
+### v2: Core API Hooking (Current)
+- Hooks `result_get_text` from Azure Speech SDK core DLL
+- Queries `result_get_reason` for recognition state detection
 - Direct API interception with standard function signature
 - Narrow string (`char*`) handling
-- More reliable and update-resistant
+- Persistent Named Pipe connection to preserve splitter state
+- Delta watermark sentence splitter to prevent duplicates
 
-**Benefits**:
+**Key Improvements**:
 - Earlier access to recognized text (before UI rendering)
+- Reliable partial/final detection via SDK API (not punctuation heuristics)
 - Better compatibility across Windows updates
-- Cleaner codebase with file-based debugging
-- More robust module detection
+- Split-view console UI with real-time statistics
+- Intelligent sentence splitting for fast speech (multi-sentence batches)
+- Latency tracking (capture → display pipeline)
 
 ## License
 
