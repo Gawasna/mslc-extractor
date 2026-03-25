@@ -6,3 +6,4 @@ packages/
 x64/
 Release/
 Debug/
+docs/*
