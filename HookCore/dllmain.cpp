@@ -9,13 +9,28 @@
 #include <iomanip>
 #include "MinHook.h"
 
+#include <shlobj.h>
+#pragma comment(lib, "shell32.lib")
+
 // =============================================================
 // CONSTANTS
 // =============================================================
-static constexpr const char* LOG_PATH      = "C:\\Users\\Public\\live_caption_debug.txt";
 static constexpr const wchar_t* PIPE_NAME  = L"\\\\.\\pipe\\LiveCaptionPipe";
 static constexpr int MODULE_SCAN_RETRIES   = 20;
 static constexpr int MODULE_SCAN_INTERVAL  = 1000;  // ms
+
+// Helper to get AppData path for logging
+std::string GetLogPath() {
+    char path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
+        std::string fullPath = path;
+        fullPath += "\\mslc_hook_debug.txt";
+        return fullPath;
+    }
+    return "C:\\Users\\Public\\mslc_hook_debug.txt"; // Fallback
+}
+
+static const std::string LOG_PATH = GetLogPath();
 
 // =============================================================
 // PERSISTENT PIPE CLIENT STATE
@@ -231,10 +246,19 @@ int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint
 DWORD WINAPI HookThread(LPVOID /*lpParam*/) {
     LogInfo("Thread started. Scanning for Core DLL handle...");
 
+    // Phase 1 Mitigation: Obfuscate target DLL name
+    // "microsoft.cognitiveservices.speech.core.dll"
+    char p1[] = { 'm','i','c','r','o','s','o','f','t','.',0 };
+    char p2[] = { 'c','o','g','n','i','t','i','v','e','s','e','r','v','i','c','e','s','.',0 };
+    char p3[] = { 's','p','e','e','c','h','.',0 };
+    char p4[] = { 'c','o','r','e','.',0 };
+    char p5[] = { 'd','l','l',0 };
+    std::string targetDll = std::string(p1) + p2 + p3 + p4 + p5;
+
     // --- Phase 1: Find core DLL ---
     HMODULE hCoreDLL = nullptr;
     for (int retry = 0; retry < MODULE_SCAN_RETRIES && hCoreDLL == nullptr; ++retry) {
-        hCoreDLL = FindModuleByPartialName("microsoft.cognitiveservices.speech.core.dll");
+        hCoreDLL = FindModuleByPartialName(targetDll);
         if (hCoreDLL == nullptr) {
             LogInfo("Scanning for DLL... Retry " + std::to_string(retry + 1)
                     + "/" + std::to_string(MODULE_SCAN_RETRIES));

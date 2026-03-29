@@ -127,6 +127,13 @@
   <ItemGroup>
     <ClCompile Include="Loader.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Loader.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="Loader.manifest" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
