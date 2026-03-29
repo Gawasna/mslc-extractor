@@ -16,11 +16,26 @@
 #include <fstream>
 
 
+#include <shlobj.h>
+#pragma comment(lib, "shell32.lib")
+
 // =============================================================
 // CONSTANTS
 // =============================================================
 static constexpr const wchar_t* PIPE_NAME   = L"\\\\.\\pipe\\LiveCaptionPipe";
 static constexpr const wchar_t* TARGET_APP  = L"LiveCaptions.exe";
+
+// Helper to get AppData path for logging
+std::string GetLogPath() {
+    char path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
+        std::string fullPath = path;
+        fullPath += "\\mslc_loader_debug.txt";
+        return fullPath;
+    }
+    return "C:\\Users\\Public\\mslc_loader_debug.txt"; // Fallback
+}
+
 // Panel column config (characters). Adjust to taste.
 static constexpr int COL_LIVE_W     = 46;   // Live stream panel width
 static constexpr int COL_CONFIRM_W  = 46;   // Confirmed sentences panel width
@@ -39,9 +54,9 @@ static constexpr SHORT CONTENT_TOP  = 2;
 // Keeps a rolling window of the last LOG_MAX_LINES log entries.
 // Each write flushes the full ring to disk (file stays small: <=100 lines).
 // Uses a separate CRITICAL_SECTION from g_cs to prevent deadlock.
-// Log file: C:\Users\Public\loader_debug.txt
+// Log file: %LOCALAPPDATA%\mslc_loader_debug.txt
 // =============================================================
-static constexpr const char* LOADER_LOG_PATH  = "C:\\Users\\Public\\loader_debug.txt";
+static const std::string     LOADER_LOG_PATH   = GetLogPath();
 static constexpr size_t      LOG_MAX_LINES     = 100;
 static CRITICAL_SECTION      g_logCs;
 static std::deque<std::string> g_logRing;
@@ -503,16 +518,36 @@ void SetAppContainerPermission(const std::wstring& filePath) {
 
 DWORD GetProcessIdByName(const wchar_t* processName) {
     DWORD pid = 0;
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+    // Phase 1 Mitigation: Dynamic API resolution and string obfuscation for Toolhelp32
+    // "CreateToolhelp32Snapshot", "Process32FirstW", "Process32NextW"
+    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+    if (!hKernel32) return 0;
+
+    typedef HANDLE(WINAPI* CreateSnapshot_t)(DWORD, DWORD);
+    typedef BOOL(WINAPI* ProcessFirst_t)(HANDLE, LPPROCESSENTRY32W);
+    typedef BOOL(WINAPI* ProcessNext_t)(HANDLE, LPPROCESSENTRY32W);
+
+    char p1[] = { 'C','r','e','a','t','e','T','o','o','l','h','e','l','p','3','2','S','n','a','p','s','h','o','t',0 };
+    char p2[] = { 'P','r','o','c','e','s','s','3','2','F','i','r','s','t','W',0 };
+    char p3[] = { 'P','r','o','c','e','s','s','3','2','N','e','x','t','W',0 };
+
+    auto pCreateSnapshot = (CreateSnapshot_t)GetProcAddress(hKernel32, p1);
+    auto pProcessFirst    = (ProcessFirst_t)GetProcAddress(hKernel32, p2);
+    auto pProcessNext     = (ProcessNext_t)GetProcAddress(hKernel32, p3);
+
+    if (!pCreateSnapshot || !pProcessFirst || !pProcessNext) return 0;
+
+    HANDLE snapshot = pCreateSnapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot != INVALID_HANDLE_VALUE) {
         PROCESSENTRY32W entry = { sizeof(entry) };
-        if (Process32FirstW(snapshot, &entry)) {
+        if (pProcessFirst(snapshot, &entry)) {
             do {
                 if (_wcsicmp(entry.szExeFile, processName) == 0) {
                     pid = entry.th32ProcessID;
                     break;
                 }
-            } while (Process32NextW(snapshot, &entry));
+            } while (pProcessNext(snapshot, &entry));
         }
         CloseHandle(snapshot);
     }
@@ -522,44 +557,73 @@ DWORD GetProcessIdByName(const wchar_t* processName) {
 bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
     SetAppContainerPermission(dllPath);
 
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-    if (!hProcess) return false;
+    // Phase 1 Mitigation: Use minimum required permissions instead of PROCESS_ALL_ACCESS
+    DWORD dwDesiredAccess = PROCESS_CREATE_THREAD | 
+                            PROCESS_QUERY_INFORMATION | 
+                            PROCESS_VM_OPERATION | 
+                            PROCESS_VM_WRITE | 
+                            PROCESS_VM_READ;
 
-    const size_t allocSize = (dllPath.length() + 1) * sizeof(wchar_t);
-    void* remoteMem = VirtualAllocEx(hProcess, nullptr, allocSize,
-                                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remoteMem) {
-        CloseHandle(hProcess);
+    HANDLE hProcess = OpenProcess(dwDesiredAccess, FALSE, pid);
+    if (!hProcess) {
+        LogLoader("INJECT", "OpenProcess failed (err=" + std::to_string(GetLastError()) + ")");
         return false;
     }
 
-    WriteProcessMemory(hProcess, remoteMem, dllPath.c_str(), allocSize, nullptr);
-
-    // Fix C6387: validate hKernel32 before dereferencing
+    // Phase 1 Mitigation: Dynamic API resolution and string obfuscation for injection APIs
     HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
     if (!hKernel32) {
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    typedef LPVOID(WINAPI* VirtualAllocEx_t)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
+    typedef BOOL(WINAPI* WriteProcessMemory_t)(HANDLE, LPVOID, LPCVOID, SIZE_T, SIZE_T*);
+    typedef HANDLE(WINAPI* CreateRemoteThread_t)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+
+    char v_a_e[] = { 'V','i','r','t','u','a','l','A','l','l','o','c','E','x',0 };
+    char w_p_m[] = { 'W','r','i','t','e','P','r','o','c','e','s','s','M','e','m','o','r','y',0 };
+    char c_r_t[] = { 'C','r','e','a','t','e','R','e','m','o','t','e','T','h','r','e','a','d',0 };
+    char l_l_w[] = { 'L','o','a','d','L','i','b','r','a','r','y','W',0 };
+
+    auto pVirtualAllocEx    = (VirtualAllocEx_t)GetProcAddress(hKernel32, v_a_e);
+    auto pWriteProcessMemory = (WriteProcessMemory_t)GetProcAddress(hKernel32, w_p_m);
+    auto pCreateRemoteThread = (CreateRemoteThread_t)GetProcAddress(hKernel32, c_r_t);
+    auto pLoadLibraryW       = GetProcAddress(hKernel32, l_l_w);
+
+    if (!pVirtualAllocEx || !pWriteProcessMemory || !pCreateRemoteThread || !pLoadLibraryW) {
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    const size_t allocSize = (dllPath.length() + 1) * sizeof(wchar_t);
+    void* remoteMem = pVirtualAllocEx(hProcess, nullptr, allocSize,
+                                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remoteMem) {
+        LogLoader("INJECT", "VirtualAllocEx failed (err=" + std::to_string(GetLastError()) + ")");
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    if (!pWriteProcessMemory(hProcess, remoteMem, dllPath.c_str(), allocSize, nullptr)) {
+        LogLoader("INJECT", "WriteProcessMemory failed (err=" + std::to_string(GetLastError()) + ")");
         VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return false;
     }
 
-    FARPROC pLoadLib = GetProcAddress(hKernel32, "LoadLibraryW");
-    if (!pLoadLib) {
-        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-        CloseHandle(hProcess);
-        return false;
-    }
-
-    HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0,
-                                        reinterpret_cast<LPTHREAD_START_ROUTINE>(pLoadLib),
+    HANDLE hThread = pCreateRemoteThread(hProcess, nullptr, 0,
+                                        reinterpret_cast<LPTHREAD_START_ROUTINE>(pLoadLibraryW),
                                         remoteMem, 0, nullptr);
     if (hThread) {
         WaitForSingleObject(hThread, INFINITE);
         CloseHandle(hThread);
+        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return true;
     }
 
+    LogLoader("INJECT", "CreateRemoteThread failed (err=" + std::to_string(GetLastError()) + ")");
     VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
     CloseHandle(hProcess);
     return false;
@@ -595,18 +659,8 @@ int main() {
     // Start pipe listener (dedicated thread, receives data from HookCore)
     std::thread(PipeListener).detach();
 
-    // Locate or launch LiveCaptions.exe
-    DWORD pid = GetProcessIdByName(TARGET_APP);
-    if (pid == 0) {
-        MoveConsoleCursor(0, CONSOLE_H - 1);
-        std::wcout << L"[i] Opening Live Captions settings...";
-        ShellExecuteW(NULL, L"open", L"ms-settings:privacy-livecaptions",
-                      NULL, NULL, SW_SHOWNORMAL);
-        while (pid == 0) {
-            pid = GetProcessIdByName(TARGET_APP);
-            Sleep(1000);
-        }
-    }
+    MoveConsoleCursor(0, CONSOLE_H - 1);
+    std::wcout << L"[*] Waiting for LiveCaptions.exe to start...";
 
     // Resolve DLL path relative to this executable
     wchar_t exePath[MAX_PATH] = {};
@@ -614,11 +668,29 @@ int main() {
     std::wstring strPath(exePath);
     std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\HookCore.dll";
 
-    MoveConsoleCursor(0, CONSOLE_H - 1);
-    if (InjectDLL(pid, dllPath)) {
-        std::wcout << L"[+] HookCore.dll injected OK. Listening for captions...";
-    } else {
-        std::wcout << L"[-] Injection failed. DLL: " << dllPath;
+    // Passive waiting loop for TARGET_APP
+    DWORD pid = 0;
+    bool injected = false;
+    while (!injected) {
+        pid = GetProcessIdByName(TARGET_APP);
+        if (pid != 0) {
+            MoveConsoleCursor(0, CONSOLE_H - 1);
+            ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+            std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting...";
+            
+            if (InjectDLL(pid, dllPath)) {
+                MoveConsoleCursor(0, CONSOLE_H - 1);
+                ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+                std::wcout << L"[+] HookCore.dll injected OK. Listening for captions...";
+                injected = true;
+            } else {
+                MoveConsoleCursor(0, CONSOLE_H - 1);
+                ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+                std::wcout << L"[-] Injection failed. Retrying in 2s...";
+                Sleep(2000);
+            }
+        }
+        Sleep(2000);
     }
 
     // Keep loader alive; pipe listener thread does the actual work
