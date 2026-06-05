@@ -269,7 +269,7 @@ DWORD WINAPI SenderThread(LPVOID /*lpParam*/) {
 }
 
 // Build JSON payload inline to avoid heap allocations on hot path
-static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_ms) {
+static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_ms, uint64_t offset, uint64_t duration, const char* result_id) {
     const size_t text_bytes = strlen(text);
 
     std::string escaped;
@@ -285,6 +285,9 @@ static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_
          << "\",\"is_final\":"  << (is_final ? "true" : "false")
          << ",\"bytes\":"    << text_bytes
          << ",\"ts_ms\":"    << ts_ms
+         << ",\"offset\":"   << offset
+         << ",\"duration\":" << duration
+         << ",\"result_id\":\"" << result_id << "\""
          << '}';
     return json.str();
 }
@@ -340,11 +343,17 @@ enum Result_Reason : int {
     ResultReason_TranslatedSpeech  = 7,
 };
 
-typedef int(__stdcall* result_get_text_t)  (SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
-typedef int(__stdcall* result_get_reason_t)(SPXRESULTHANDLE hresult, int*  pReason);
+typedef int(__stdcall* result_get_text_t)     (SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
+typedef int(__stdcall* result_get_reason_t)   (SPXRESULTHANDLE hresult, int*  pReason);
+typedef int(__stdcall* result_get_offset_t)   (SPXRESULTHANDLE hresult, uint64_t* pOffset);
+typedef int(__stdcall* result_get_duration_t) (SPXRESULTHANDLE hresult, uint64_t* pDuration);
+typedef int(__stdcall* result_get_result_id_t)(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
 
-result_get_text_t   fpOriginalResultGetText   = nullptr;
-result_get_reason_t fpOriginalResultGetReason = nullptr;
+result_get_text_t      fpOriginalResultGetText      = nullptr;
+result_get_reason_t    fpOriginalResultGetReason    = nullptr;
+result_get_offset_t    fpOriginalResultGetOffset    = nullptr;
+result_get_duration_t  fpOriginalResultGetDuration  = nullptr;
+result_get_result_id_t fpOriginalResultGetResultId  = nullptr;
 
 int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen) {
     const int ret = fpOriginalResultGetText(hresult, buffer, bufferLen);
@@ -360,11 +369,27 @@ int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint
         }
     }
 
+    uint64_t offset = 0;
+    uint64_t duration = 0;
+    char resultId[128] = { 0 };
+
+    if (fpOriginalResultGetOffset != nullptr) {
+        fpOriginalResultGetOffset(hresult, &offset);
+    }
+    if (fpOriginalResultGetDuration != nullptr) {
+        fpOriginalResultGetDuration(hresult, &duration);
+    }
+    if (fpOriginalResultGetResultId != nullptr) {
+        fpOriginalResultGetResultId(hresult, resultId, sizeof(resultId));
+    }
+
     const DWORD64 ts_ms = GetTickCount64();
 
-    LogInfo(std::string(is_final ? "FINAL: " : "PARTIAL: ") + buffer);
+    LogInfo(std::string(is_final ? "FINAL: " : "PARTIAL: ") + buffer + 
+            " (Id: " + resultId + ", Offset: " + std::to_string(offset) + 
+            ", Duration: " + std::to_string(duration) + ")");
 
-    const std::string payload = BuildJsonPayload(buffer, is_final, ts_ms);
+    const std::string payload = BuildJsonPayload(buffer, is_final, ts_ms, offset, duration, resultId);
     PushToQueue(payload); // Push to background queue, zero latency on target thread
 
     return ret;
@@ -396,6 +421,9 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
     LogInfo("HookThread: Core DLL found. Resolving exports...");
     FARPROC pGetText   = GetProcAddress(hCoreDLL, "result_get_text");
     FARPROC pGetReason = GetProcAddress(hCoreDLL, "result_get_reason");
+    FARPROC pGetOffset  = GetProcAddress(hCoreDLL, "result_get_offset");
+    FARPROC pGetDuration = GetProcAddress(hCoreDLL, "result_get_duration");
+    FARPROC pGetResultId = GetProcAddress(hCoreDLL, "result_get_result_id");
 
     if (!pGetText) {
         LogError("HookThread: 'result_get_text' export not found.");
@@ -417,6 +445,18 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
     if (pGetReason) {
         fpOriginalResultGetReason = reinterpret_cast<result_get_reason_t>(pGetReason);
         LogInfo("HookThread: 'result_get_reason' resolved.");
+    }
+    if (pGetOffset) {
+        fpOriginalResultGetOffset = reinterpret_cast<result_get_offset_t>(pGetOffset);
+        LogInfo("HookThread: 'result_get_offset' resolved.");
+    }
+    if (pGetDuration) {
+        fpOriginalResultGetDuration = reinterpret_cast<result_get_duration_t>(pGetDuration);
+        LogInfo("HookThread: 'result_get_duration' resolved.");
+    }
+    if (pGetResultId) {
+        fpOriginalResultGetResultId = reinterpret_cast<result_get_result_id_t>(pGetResultId);
+        LogInfo("HookThread: 'result_get_result_id' resolved.");
     }
 
     if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {

@@ -275,6 +275,9 @@ struct PipePacket {
     bool         is_final = false;
     DWORD64      bytes    = 0;
     DWORD64      ts_ms    = 0;
+    DWORD64      offset   = 0;
+    DWORD64      duration = 0;
+    std::wstring result_id;
 };
 
 bool ParsePacket(const std::wstring& data, PipePacket& out) {
@@ -295,6 +298,25 @@ bool ParsePacket(const std::wstring& data, PipePacket& out) {
     p = data.find(L"\"ts_ms\":");
     if (p != std::wstring::npos) {
         out.ts_ms = static_cast<DWORD64>(_wtoi64(data.c_str() + p + 8));
+    }
+
+    p = data.find(L"\"offset\":");
+    if (p != std::wstring::npos) {
+        out.offset = static_cast<DWORD64>(_wtoi64(data.c_str() + p + 9));
+    }
+
+    p = data.find(L"\"duration\":");
+    if (p != std::wstring::npos) {
+        out.duration = static_cast<DWORD64>(_wtoi64(data.c_str() + p + 11));
+    }
+
+    p = data.find(L"\"result_id\":\"");
+    if (p != std::wstring::npos) {
+        p += 13;
+        size_t r_end = data.find(L'"', p);
+        if (r_end != std::wstring::npos) {
+            out.result_id = data.substr(p, r_end - p);
+        }
     }
     return true;
 }
@@ -561,18 +583,30 @@ void MockClientThread(std::wstring pipeName) {
         std::stringstream ss(sentence);
         std::string word;
         std::string currentText = "";
+        int wordCount = 0;
         while (ss >> word) {
             if (!currentText.empty()) currentText += " ";
             currentText += word;
+            wordCount++;
             
-            std::string payload = "{\"text\":\"" + currentText + "\",\"is_final\":false,\"bytes\":" + std::to_string(currentText.length()) + ",\"ts_ms\":" + std::to_string(GetTickCount64()) + "}";
+            std::string payload = "{\"text\":\"" + currentText + 
+                                  "\",\"is_final\":false,\"bytes\":" + std::to_string(currentText.length()) + 
+                                  ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
+                                  ",\"offset\":" + std::to_string(wordCount * 10000) + 
+                                  ",\"duration\":" + std::to_string(5000) + 
+                                  ",\"result_id\":\"mock_id_" + std::to_string(GetTickCount64() % 1000) + "\"}";
             
             DWORD written = 0;
             WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
             Sleep(250); // Simulate typing
         }
         
-        std::string payload = "{\"text\":\"" + sentence + "\",\"is_final\":true,\"bytes\":" + std::to_string(sentence.length()) + ",\"ts_ms\":" + std::to_string(GetTickCount64()) + "}";
+        std::string payload = "{\"text\":\"" + sentence + 
+                              "\",\"is_final\":true,\"bytes\":" + std::to_string(sentence.length()) + 
+                              ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
+                              ",\"offset\":" + std::to_string(wordCount * 10000) + 
+                              ",\"duration\":" + std::to_string(10000) + 
+                              ",\"result_id\":\"mock_id_final_" + std::to_string(GetTickCount64() % 1000) + "\"}";
         DWORD written = 0;
         WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
         Sleep(1000); // Interval between sentences
@@ -963,9 +997,14 @@ int main(int argc, char* argv[]) {
             ? (rawPkt.recvTick - pkt.ts_ms)
             : 0;
 
+        // Convert result_id to narrow string for logging
+        std::string narrowId(pkt.result_id.begin(), pkt.result_id.end());
         LogHost("PKT", std::string(pkt.is_final ? "FINAL  " : "PARTIAL") + 
                   " text_len=" + std::to_string(pkt.text.size()) + 
-                  " delay=" + std::to_string(delayMs) + "ms");
+                  " delay=" + std::to_string(delayMs) + "ms" +
+                  " id=" + narrowId +
+                  " offset=" + std::to_string(pkt.offset) +
+                  " duration=" + std::to_string(pkt.duration));
 
         {
             std::lock_guard<std::mutex> lock(g_csMutex);
