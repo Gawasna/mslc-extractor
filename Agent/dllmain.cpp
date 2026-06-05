@@ -66,19 +66,32 @@ typedef NTSTATUS (NTAPI *PLDR_UNREGISTER_DLL_NOTIFICATION)(
 static constexpr const wchar_t* PIPE_NAME  = L"\\\\.\\pipe\\LiveCaptionPipe";
 static constexpr size_t QUEUE_MAX_SIZE      = 100;
 
-// Helper to get AppData path for logging
+static HMODULE g_hModule = NULL;
+static std::string g_logPath = "";
+static std::mutex g_logMutex;
+
+// Helper to get workspace/logs path for logging
 std::string GetLogPath() {
-    char path[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
-        std::string fullPath = path;
-        fullPath += "\\mslc_agent_debug.txt";
-        return fullPath;
+    wchar_t path[MAX_PATH];
+    if (GetModuleFileNameW(g_hModule, path, MAX_PATH)) {
+        std::wstring wPath(path);
+        size_t pos = wPath.find_last_of(L"\\");
+        if (pos != std::wstring::npos) {
+            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
+            pos = dir.find_last_of(L"\\");
+            if (pos != std::wstring::npos) {
+                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
+                pos = root.find_last_of(L"\\");
+                if (pos != std::wstring::npos) {
+                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
+                    std::wstring logFile = projectRoot + L"\\logs\\mslc_agent_debug.txt";
+                    return std::string(logFile.begin(), logFile.end());
+                }
+            }
+        }
     }
     return "C:\\Users\\Public\\mslc_agent_debug.txt"; // Fallback
 }
-
-static const std::string LOG_PATH = GetLogPath();
-static std::mutex g_logMutex;
 
 // =============================================================
 // STRUCTURED LOGGER (Thread-Safe)
@@ -102,7 +115,7 @@ void LogToFile(const char* level, const std::string& msg) {
           << msg;
 
     std::lock_guard<std::mutex> lock(g_logMutex);
-    std::ofstream logFile(LOG_PATH, std::ios_base::app);
+    std::ofstream logFile(g_logPath, std::ios_base::app);
     if (logFile.is_open()) {
         logFile << entry.str() << '\n';
     }
@@ -443,11 +456,14 @@ VOID NTAPI DllNotificationCallback(ULONG NotificationReason, PLDR_DLL_NOTIFICATI
 // =============================================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpReserved*/) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
+        g_hModule = hModule;
+        g_logPath = GetLogPath();
+
         DisableThreadLibraryCalls(hModule);
 
         // Truncate log file at session start
         {
-            std::ofstream logFile(LOG_PATH, std::ios_base::trunc);
+            std::ofstream logFile(g_logPath, std::ios_base::trunc);
             logFile << "[Agent] === New Session Started ===\n";
         }
 

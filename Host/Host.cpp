@@ -22,21 +22,21 @@
 #pragma comment(lib, "shell32.lib")
 
 // =============================================================
-// CONSTANTS
+// CONSTANTS & CLI GLOBALS
 // =============================================================
-static constexpr const wchar_t* PIPE_NAME   = L"\\\\.\\pipe\\LiveCaptionPipe";
 static constexpr const wchar_t* TARGET_APP  = L"LiveCaptions.exe";
 
-// Helper to get AppData path for logging
-std::string GetLogPath() {
-    char path[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
-        std::string fullPath = path;
-        fullPath += "\\mslc_host_debug.txt";
-        return fullPath;
-    }
-    return "C:\\Users\\Public\\mslc_host_debug.txt"; // Fallback
-}
+static DWORD g_targetPid = 0;
+static std::wstring g_customPipeName = L"\\\\.\\pipe\\LiveCaptionPipe";
+static bool g_debugMode = false;
+static std::string g_customLogPath = "";
+static bool g_stdoutOnly = false;
+static bool g_noSpawn = false;
+static bool g_injectOnly = false;
+static bool g_mockMode = false;
+
+// Log file path determined dynamically
+static std::string g_logPath = "";
 
 // Panel column config (characters).
 static constexpr int COL_LIVE_W     = 46;   // Live stream panel width
@@ -84,15 +84,45 @@ public:
     }
 };
 
+// Helper to determine root logs path
+std::string GetLogPath() {
+    if (!g_customLogPath.empty()) {
+        return g_customLogPath;
+    }
+
+    wchar_t path[MAX_PATH];
+    if (GetModuleFileNameW(NULL, path, MAX_PATH)) {
+        std::wstring wPath(path);
+        size_t pos = wPath.find_last_of(L"\\");
+        if (pos != std::wstring::npos) {
+            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
+            pos = dir.find_last_of(L"\\");
+            if (pos != std::wstring::npos) {
+                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
+                pos = root.find_last_of(L"\\");
+                if (pos != std::wstring::npos) {
+                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
+                    std::wstring logFile = projectRoot + L"\\logs\\mslc_host_debug.txt";
+                    return std::string(logFile.begin(), logFile.end());
+                }
+            }
+        }
+    }
+    return "C:\\Users\\Public\\mslc_host_debug.txt"; // Fallback
+}
+
 // =============================================================
 // HOST DEBUG LOGGER (Thread-Safe)
 // =============================================================
-static const std::string       HOST_LOG_PATH = GetLogPath();
 static constexpr size_t        LOG_MAX_LINES = 100;
 static std::mutex              g_logMutex;
 static std::deque<std::string> g_logRing;
 
-void LogLoader(const char* category, const std::string& msg) {
+void LogHost(const char* category, const std::string& msg) {
+    if (g_debugMode) {
+        std::cerr << "[" << category << "] " << msg << std::endl;
+    }
+
     SYSTEMTIME st;
     GetLocalTime(&st);
 
@@ -104,17 +134,26 @@ void LogLoader(const char* category, const std::string& msg) {
           << std::setw(2) << st.wSecond << '.'
           << std::setw(3) << st.wMilliseconds
           << "] ["
+          << std::setfill(' ') // Reset fill character to space
           << std::left << std::setw(8) << category
           << "] "
           << msg;
 
     std::lock_guard<std::mutex> lock(g_logMutex);
-    g_logRing.push_back(entry.str());
-    if (g_logRing.size() > LOG_MAX_LINES) g_logRing.pop_front();
+    
+    if (!g_debugMode) {
+        g_logRing.push_back(entry.str());
+        if (g_logRing.size() > LOG_MAX_LINES) g_logRing.pop_front();
 
-    std::ofstream f(HOST_LOG_PATH, std::ios_base::trunc);
-    if (f.is_open()) {
-        for (const auto& line : g_logRing) f << line << '\n';
+        std::ofstream f(g_logPath, std::ios_base::trunc);
+        if (f.is_open()) {
+            for (const auto& line : g_logRing) f << line << '\n';
+        }
+    } else {
+        std::ofstream f(g_logPath, std::ios_base::app);
+        if (f.is_open()) {
+            f << entry.str() << '\n';
+        }
     }
 }
 
@@ -281,7 +320,7 @@ struct SentenceSplitter {
         std::vector<std::wstring> results;
 
         if (text.size() < prev_text.size()) {
-            LogLoader("SPLITTER",
+            LogHost("SPLITTER",
                 "REGRESSION detected: prev_len=" + std::to_string(prev_text.size()) +
                 " new_len=" + std::to_string(text.size()) + " -> RESET watermark");
             Reset();
@@ -294,7 +333,7 @@ struct SentenceSplitter {
             if (start != std::wstring::npos) tail = tail.substr(start);
 
             if (!tail.empty()) {
-                LogLoader("SPLITTER",
+                LogHost("SPLITTER",
                     "FINAL tail_len=" + std::to_string(tail.size()) +
                     " tail=\"" + TruncateForLog(tail) + "\" -> COMMIT & RESET");
                 results.push_back(tail);
@@ -320,7 +359,7 @@ struct SentenceSplitter {
                     if (trim != std::wstring::npos && trim > 0) sentence = sentence.substr(trim);
 
                     if (!sentence.empty()) {
-                        LogLoader("EMIT", "Emitting sentence: \"" + TruncateForLog(sentence) + "\"");
+                        LogHost("EMIT", "Emitting sentence: \"" + TruncateForLog(sentence) + "\"");
                         results.push_back(sentence);
                     }
                     commit_pos = scan_pos + 1;
@@ -355,30 +394,29 @@ static std::atomic<bool>        g_exitHost{false};
 void PipeListener() {
     PSECURITY_DESCRIPTOR pSD = NULL;
     // Secure DACL: 
-    // S-1-15-2-1: ALL APPLICATION PACKAGES (AppContainers) - Generic Read/Write
-    // CO: Creator Owner - Generic All
+    // Allow AppContainers (S-1-15-2-1) & Everyone (WD) generic Read/Write.
+    // Local System (SY) & Administrators (BA) generic All.
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GRGW;;;S-1-15-2-1)(A;;GA;;;CO)", 
+            L"D:(A;;GRGW;;;S-1-15-2-1)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)", 
             SDDL_REVISION_1, 
             &pSD, 
             NULL)) {
-        LogLoader("PIPE", "Fatal: ConvertStringSecurityDescriptorToSecurityDescriptor failed.");
+        LogHost("PIPE", "Fatal: ConvertStringSecurityDescriptorToSecurityDescriptor failed.");
         return;
     }
 
     SECURITY_ATTRIBUTES sa = { sizeof(sa), pSD, FALSE };
 
     while (!g_exitHost) {
-        // Create pipe with Overlapped support
         HANDLE hPipe = CreateNamedPipeW(
-            PIPE_NAME,
+            g_customPipeName.c_str(),
             PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             1, 65536, 65536, 0, &sa
         );
 
         if (hPipe == INVALID_HANDLE_VALUE) {
-            LogLoader("PIPE", "CreateNamedPipeW failed. Retrying in 1s.");
+            LogHost("PIPE", "CreateNamedPipeW failed. Retrying in 1s.");
             Sleep(1000);
             continue;
         }
@@ -409,7 +447,7 @@ void PipeListener() {
             continue;
         }
 
-        LogLoader("PIPE", "Agent connected. Overlapped read session started.");
+        LogHost("PIPE", "Agent connected. Overlapped read session started.");
 
         static constexpr DWORD PIPE_BUF_BYTES = 65536;
         std::vector<char> rawBuf(PIPE_BUF_BYTES);
@@ -431,7 +469,6 @@ void PipeListener() {
             if (!readOk) {
                 DWORD err = GetLastError();
                 if (err == ERROR_IO_PENDING) {
-                    // Timeout set to 10 seconds for Zombie connection mitigation
                     DWORD waitRes = WaitForSingleObject(hReadEvent.Get(), 10000);
                     if (waitRes == WAIT_OBJECT_0) {
                         if (GetOverlappedResult(shPipe.Get(), &ovRead, &bytesRead, FALSE)) {
@@ -440,7 +477,7 @@ void PipeListener() {
                             readOk = FALSE;
                         }
                     } else if (waitRes == WAIT_TIMEOUT) {
-                        LogLoader("PIPE", "Read timeout (zombie connection). Force reconnecting.");
+                        LogHost("PIPE", "Read timeout (zombie connection). Force reconnecting.");
                         break;
                     } else {
                         readOk = FALSE;
@@ -451,14 +488,13 @@ void PipeListener() {
             }
 
             if (!readOk || bytesRead == 0) {
-                LogLoader("PIPE", "Pipe closed or agent disconnected.");
+                LogHost("PIPE", "Pipe closed or agent disconnected.");
                 break;
             }
 
             rawBuf[bytesRead] = '\0';
             const DWORD64 recvTick = GetTickCount64();
 
-            // Push raw packet to queue (Zero-latency on IPC thread)
             {
                 std::lock_guard<std::mutex> lock(g_queueMutex);
                 g_packetQueue.push_back({ std::string(rawBuf.data(), bytesRead), recvTick });
@@ -468,7 +504,6 @@ void PipeListener() {
 
         DisconnectNamedPipe(shPipe.Get());
         
-        // Reset splitter safely on disconnect
         {
             std::lock_guard<std::mutex> lock(g_csMutex);
             g_splitter.Reset();
@@ -478,6 +513,73 @@ void PipeListener() {
     if (pSD) {
         LocalFree(pSD);
     }
+}
+
+// =============================================================
+// MOCK CLIENT THREAD (offline UI & Splitter verification)
+// =============================================================
+void MockClientThread(std::wstring pipeName) {
+    LogHost("MOCK", "Mock client thread started.");
+    Sleep(1500); // Wait for Pipe Server to initialize
+    
+    DWORD lastErr = 0;
+    HANDLE hPipe = INVALID_HANDLE_VALUE;
+    for (int i = 0; i < 10; ++i) {
+        hPipe = CreateFileW(
+            pipeName.c_str(),
+            GENERIC_WRITE,
+            0,
+            NULL,
+            OPEN_EXISTING,
+            0,
+            NULL
+        );
+        if (hPipe != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        lastErr = GetLastError();
+        Sleep(500);
+    }
+    
+    if (hPipe == INVALID_HANDLE_VALUE) {
+        LogHost("MOCK", "Failed to connect to mock pipe server. Last error: " + std::to_string(lastErr));
+        return;
+    }
+    
+    LogHost("MOCK", "Mock client connected to pipe server.");
+    
+    std::vector<std::string> mockSentences = {
+        "Hello, this is a mock subtitle test.",
+        "We are verifying the split-view console user interface.",
+        "The delta watermark sentence splitter should process this correctly.",
+        "It splits incoming text stream by punctuation marks.",
+        "Does the mock verification look good?",
+        "Yes, it seems to work beautifully!"
+    };
+    
+    for (const auto& sentence : mockSentences) {
+        std::stringstream ss(sentence);
+        std::string word;
+        std::string currentText = "";
+        while (ss >> word) {
+            if (!currentText.empty()) currentText += " ";
+            currentText += word;
+            
+            std::string payload = "{\"text\":\"" + currentText + "\",\"is_final\":false,\"bytes\":" + std::to_string(currentText.length()) + ",\"ts_ms\":" + std::to_string(GetTickCount64()) + "}";
+            
+            DWORD written = 0;
+            WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
+            Sleep(250); // Simulate typing
+        }
+        
+        std::string payload = "{\"text\":\"" + sentence + "\",\"is_final\":true,\"bytes\":" + std::to_string(sentence.length()) + ",\"ts_ms\":" + std::to_string(GetTickCount64()) + "}";
+        DWORD written = 0;
+        WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
+        Sleep(1000); // Interval between sentences
+    }
+    
+    CloseHandle(hPipe);
+    LogHost("MOCK", "Mock client finished and disconnected.");
 }
 
 // =============================================================
@@ -491,6 +593,25 @@ void SetAppContainerPermission(const std::wstring& filePath) {
                                NULL, NULL, &pOldDACL, NULL, &pSD) == ERROR_SUCCESS) {
         BuildExplicitAccessWithNameW(&ea, const_cast<LPWSTR>(L"ALL APPLICATION PACKAGES"),
                                      GENERIC_READ | GENERIC_EXECUTE,
+                                     SET_ACCESS, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
+        if (SetEntriesInAclW(1, &ea, pOldDACL, &pNewDACL) == ERROR_SUCCESS) {
+            SetNamedSecurityInfoW(const_cast<LPWSTR>(filePath.c_str()),
+                                  SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                  NULL, NULL, pNewDACL, NULL);
+            LocalFree(pNewDACL);
+        }
+        LocalFree(pSD);
+    }
+}
+
+void SetAppContainerWritePermission(const std::wstring& filePath) {
+    PACL pOldDACL = NULL, pNewDACL = NULL;
+    PSECURITY_DESCRIPTOR pSD = NULL;
+    EXPLICIT_ACCESSW ea = { 0 };
+    if (GetNamedSecurityInfoW(filePath.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                               NULL, NULL, &pOldDACL, NULL, &pSD) == ERROR_SUCCESS) {
+        BuildExplicitAccessWithNameW(&ea, const_cast<LPWSTR>(L"ALL APPLICATION PACKAGES"),
+                                     GENERIC_READ | GENERIC_WRITE | GENERIC_ALL,
                                      SET_ACCESS, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
         if (SetEntriesInAclW(1, &ea, pOldDACL, &pNewDACL) == ERROR_SUCCESS) {
             SetNamedSecurityInfoW(const_cast<LPWSTR>(filePath.c_str()),
@@ -538,7 +659,6 @@ DWORD GetProcessIdByName(const wchar_t* processName) {
     return pid;
 }
 
-// Check if Agent.dll is already loaded in target process
 bool IsDLLAlreadyInjected(DWORD pid, const std::wstring& dllName) {
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
     if (hSnapshot == INVALID_HANDLE_VALUE) {
@@ -569,7 +689,7 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
 
     SafeHandle shProcess(OpenProcess(dwDesiredAccess, FALSE, pid));
     if (!shProcess.IsValid()) {
-        LogLoader("INJECT", "OpenProcess failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "OpenProcess failed (err=" + std::to_string(GetLastError()) + ")");
         return false;
     }
 
@@ -596,7 +716,6 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
 
     const size_t allocSize = (dllPath.length() + 1) * sizeof(wchar_t);
 
-    // RAII for remote memory management
     struct RemoteAllocDeleter {
         HANDLE hProc;
         void operator()(void* ptr) const { if (ptr) VirtualFreeEx(hProc, ptr, 0, MEM_RELEASE); }
@@ -604,13 +723,13 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
 
     void* remoteMem = pVirtualAllocEx(shProcess.Get(), nullptr, allocSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteMem) {
-        LogLoader("INJECT", "VirtualAllocEx failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "VirtualAllocEx failed (err=" + std::to_string(GetLastError()) + ")");
         return false;
     }
     std::unique_ptr<void, RemoteAllocDeleter> remoteMemGuard(remoteMem, RemoteAllocDeleter{ shProcess.Get() });
 
     if (!pWriteProcessMemory(shProcess.Get(), remoteMem, dllPath.c_str(), allocSize, nullptr)) {
-        LogLoader("INJECT", "WriteProcessMemory failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "WriteProcessMemory failed (err=" + std::to_string(GetLastError()) + ")");
         return false;
     }
 
@@ -618,7 +737,7 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
                                            reinterpret_cast<LPTHREAD_START_ROUTINE>(pLoadLibraryW),
                                            remoteMem, 0, nullptr));
     if (!shThread.IsValid()) {
-        LogLoader("INJECT", "CreateRemoteThread failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "CreateRemoteThread failed (err=" + std::to_string(GetLastError()) + ")");
         return false;
     }
 
@@ -629,81 +748,186 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
 // =============================================================
 // MAIN ENTRY & UI CONSUMER LOOP
 // =============================================================
-int main() {
-    _setmode(_fileno(stdout), _O_U16TEXT);
-    LogLoader("SESSION", "=== Host started ===");
-
-    // Adjust Console Window Size
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    SMALL_RECT windowSize = { 0, 0,
-                              static_cast<SHORT>(TOTAL_W - 1),
-                              static_cast<SHORT>(CONSOLE_H - 1) };
-    COORD bufferSize     = { static_cast<SHORT>(TOTAL_W),
-                             static_cast<SHORT>(CONSOLE_H) };
-    SetConsoleScreenBufferSize(hOut, bufferSize);
-    SetConsoleWindowInfo(hOut, TRUE, &windowSize);
-
-    // Hide Cursor
-    CONSOLE_CURSOR_INFO ci = { 1, FALSE };
-    SetConsoleCursorInfo(hOut, &ci);
-
-    DrawFrame();
-
-    // Start asynchronous Overlapped Named Pipe listener on background thread
-    std::thread pipeServerThread(PipeListener);
-    pipeServerThread.detach();
-
-    MoveConsoleCursor(0, CONSOLE_H - 1);
-    std::wcout << L"[*] Waiting for LiveCaptions.exe...";
-
-    wchar_t exePath[MAX_PATH] = {};
-    GetModuleFileNameW(NULL, exePath, MAX_PATH);
-    std::wstring strPath(exePath);
-    std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\Agent.dll";
-
-    DWORD pid = 0;
-    bool settingsOpened = false;
-
-    // Discovery Loop (Idempotent Settings Opening)
-    while (true) {
-        pid = GetProcessIdByName(TARGET_APP);
-        if (pid != 0) {
-            MoveConsoleCursor(0, CONSOLE_H - 1);
-            ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-            std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting...";
-            
-            // Check if Agent.dll is already injected
-            if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
-                MoveConsoleCursor(0, CONSOLE_H - 1);
-                ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                std::wcout << L"[+] Agent.dll already injected. Listening for captions...";
-                break;
+int main(int argc, char* argv[]) {
+    // 1. Parse CLI Arguments
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-p" || arg == "--pid") {
+            if (i + 1 < argc) {
+                g_targetPid = static_cast<DWORD>(std::stoul(argv[++i]));
             }
-
-            if (InjectDLL(pid, dllPath)) {
-                MoveConsoleCursor(0, CONSOLE_H - 1);
-                ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                std::wcout << L"[+] Agent.dll injected successfully. Listening...";
-                break;
-            } else {
-                MoveConsoleCursor(0, CONSOLE_H - 1);
-                ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                std::wcout << L"[-] Injection failed. Retrying in 2s...";
-                Sleep(2000);
+        } else if (arg == "-n" || arg == "--pipe-name") {
+            if (i + 1 < argc) {
+                std::string pipeStr = argv[++i];
+                g_customPipeName = std::wstring(pipeStr.begin(), pipeStr.end());
             }
-        } else {
-            // Idempotent open settings: Only open settings once!
-            if (!settingsOpened) {
-                // Open Live Captions settings page
-                ShellExecuteW(NULL, L"open", L"ms-settings:privacy-livecaptions", NULL, NULL, SW_SHOWNORMAL);
-                settingsOpened = true;
-                LogLoader("DISCOVERY", "ShellExecute initiated to open Live Captions Settings.");
+        } else if (arg == "-d" || arg == "--debug") {
+            g_debugMode = true;
+        } else if (arg == "--log-path") {
+            if (i + 1 < argc) {
+                g_customLogPath = argv[++i];
             }
-            Sleep(2000);
+        } else if (arg == "--stdout") {
+            g_stdoutOnly = true;
+        } else if (arg == "--no-spawn") {
+            g_noSpawn = true;
+        } else if (arg == "--inject-only") {
+            g_injectOnly = true;
+        } else if (arg == "-m" || arg == "--mock") {
+            g_mockMode = true;
         }
     }
 
-    // Consumer Loop: Handles UTF-16 Conversion, JSON Parsing, Logic and rendering
+    // 2. Initialize logs path & folder
+    g_logPath = GetLogPath();
+    size_t lastSlash = g_logPath.find_last_of("\\");
+    if (lastSlash != std::string::npos) {
+        std::string logDir = g_logPath.substr(0, lastSlash);
+        CreateDirectoryA(logDir.c_str(), NULL);
+    }
+
+    // Prepare Agent log file and grant write access to AppContainers
+    if (!g_mockMode) {
+        std::wstring agentLogPath;
+        {
+            wchar_t path[MAX_PATH];
+            if (GetModuleFileNameW(NULL, path, MAX_PATH)) {
+                std::wstring wPath(path);
+                size_t pos = wPath.find_last_of(L"\\");
+                if (pos != std::wstring::npos) {
+                    std::wstring dir = wPath.substr(0, pos);
+                    pos = dir.find_last_of(L"\\");
+                    if (pos != std::wstring::npos) {
+                        std::wstring root = dir.substr(0, pos);
+                        pos = root.find_last_of(L"\\");
+                        if (pos != std::wstring::npos) {
+                            std::wstring projectRoot = root.substr(0, pos);
+                            agentLogPath = projectRoot + L"\\logs\\mslc_agent_debug.txt";
+                        }
+                    }
+                }
+            }
+        }
+        if (!agentLogPath.empty()) {
+            HANDLE hFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                CloseHandle(hFile);
+                SetAppContainerWritePermission(agentLogPath);
+            }
+        }
+    }
+
+    LogHost("SESSION", "=== Host started ===");
+
+    // 3. UI setup (skipped in --stdout or --inject-only mode)
+    if (!g_stdoutOnly && !g_injectOnly) {
+        _setmode(_fileno(stdout), _O_U16TEXT);
+
+        // Adjust Console Window Size
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        SMALL_RECT windowSize = { 0, 0,
+                                  static_cast<SHORT>(TOTAL_W - 1),
+                                  static_cast<SHORT>(CONSOLE_H - 1) };
+        COORD bufferSize     = { static_cast<SHORT>(TOTAL_W),
+                                 static_cast<SHORT>(CONSOLE_H) };
+        SetConsoleScreenBufferSize(hOut, bufferSize);
+        SetConsoleWindowInfo(hOut, TRUE, &windowSize);
+
+        // Hide Cursor
+        CONSOLE_CURSOR_INFO ci = { 1, FALSE };
+        SetConsoleCursorInfo(hOut, &ci);
+
+        DrawFrame();
+    }
+
+    // 4. Start Named Pipe Server
+    std::thread pipeServerThread(PipeListener);
+    pipeServerThread.detach();
+
+    // 5. Start Mock Client Thread if in Mock Mode
+    if (g_mockMode) {
+        std::thread mockThread(MockClientThread, g_customPipeName);
+        mockThread.detach();
+    }
+
+    // 6. Discovery & Injection (skipped in Mock Mode)
+    if (!g_mockMode) {
+        if (!g_stdoutOnly && !g_injectOnly) {
+            MoveConsoleCursor(0, CONSOLE_H - 1);
+            std::wcout << L"[*] Waiting for LiveCaptions.exe...";
+        }
+
+        wchar_t exePath[MAX_PATH] = {};
+        GetModuleFileNameW(NULL, exePath, MAX_PATH);
+        std::wstring strPath(exePath);
+        std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\Agent.dll";
+
+        DWORD pid = g_targetPid;
+        bool settingsOpened = false;
+
+        while (true) {
+            if (pid == 0) {
+                pid = GetProcessIdByName(TARGET_APP);
+            }
+
+            if (pid != 0) {
+                if (!g_stdoutOnly && !g_injectOnly) {
+                    MoveConsoleCursor(0, CONSOLE_H - 1);
+                    ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+                    std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting...";
+                }
+                
+                if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
+                    if (!g_stdoutOnly && !g_injectOnly) {
+                        MoveConsoleCursor(0, CONSOLE_H - 1);
+                        ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+                        std::wcout << L"[+] Agent.dll already injected. Listening...";
+                    }
+                    break;
+                }
+
+                if (InjectDLL(pid, dllPath)) {
+                    if (!g_stdoutOnly && !g_injectOnly) {
+                        MoveConsoleCursor(0, CONSOLE_H - 1);
+                        ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+                        std::wcout << L"[+] Agent.dll injected successfully. Listening...";
+                    }
+                    break;
+                } else {
+                    if (!g_stdoutOnly && !g_injectOnly) {
+                        MoveConsoleCursor(0, CONSOLE_H - 1);
+                        ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
+                        std::wcout << L"[-] Injection failed. Retrying in 2s...";
+                    }
+                    Sleep(2000);
+                }
+            } else {
+                if (g_injectOnly) {
+                    Sleep(2000);
+                    continue;
+                }
+
+                if (!g_noSpawn && !settingsOpened) {
+                    ShellExecuteW(NULL, L"open", L"ms-settings:privacy-livecaptions", NULL, NULL, SW_SHOWNORMAL);
+                    settingsOpened = true;
+                    LogHost("DISCOVERY", "ShellExecute initiated to open Live Captions Settings.");
+                }
+                Sleep(2000);
+            }
+        }
+
+        if (g_injectOnly) {
+            LogHost("SESSION", "Inject-only mode completed. Exiting.");
+            return 0;
+        }
+    } else {
+        if (!g_stdoutOnly) {
+            MoveConsoleCursor(0, CONSOLE_H - 1);
+            std::wcout << L"[Mock Mode] Verification UI running...";
+        }
+    }
+
+    // 7. Consumer Loop: Handles UTF-16 Conversion, JSON Parsing, Logic and rendering
     while (!g_exitHost) {
         RawPacket rawPkt;
         {
@@ -718,7 +942,12 @@ int main() {
             g_packetQueue.pop_front();
         }
 
-        // Convert UTF-8 payload to Wide String
+        if (g_stdoutOnly) {
+            // Direct stdout JSON streaming
+            std::cout << rawPkt.data << std::endl;
+            continue;
+        }
+
         int wideLen = MultiByteToWideChar(CP_UTF8, 0, rawPkt.data.c_str(), -1, nullptr, 0);
         if (wideLen <= 0) continue;
 
@@ -730,12 +959,11 @@ int main() {
             continue;
         }
 
-        // Latency computation (safe guard against tiny clock skew)
         const DWORD64 delayMs = (pkt.ts_ms > 0 && rawPkt.recvTick >= pkt.ts_ms)
             ? (rawPkt.recvTick - pkt.ts_ms)
             : 0;
 
-        LogLoader("PKT", std::string(pkt.is_final ? "FINAL  " : "PARTIAL") + 
+        LogHost("PKT", std::string(pkt.is_final ? "FINAL  " : "PARTIAL") + 
                   " text_len=" + std::to_string(pkt.text.size()) + 
                   " delay=" + std::to_string(delayMs) + "ms");
 
