@@ -7,17 +7,64 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <atomic>
 #include "MinHook.h"
-
 #include <shlobj.h>
+
 #pragma comment(lib, "shell32.lib")
+
+// =============================================================
+// NT INTERNAL DECLARATIONS (for LdrRegisterDllNotification)
+// =============================================================
+typedef LONG NTSTATUS;
+
+#ifndef NTAPI
+#define NTAPI __stdcall
+#endif
+
+typedef struct _UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR  Buffer;
+} UNICODE_STRING, *PUNICODE_STRING;
+
+typedef const UNICODE_STRING* PCUNICODE_STRING;
+
+typedef struct _LDR_DLL_NOTIFICATION_DATA {
+    ULONG Flags;
+    PCUNICODE_STRING FullDllName;
+    PCUNICODE_STRING BaseDllName;
+    PVOID DllBase;
+    ULONG SizeOfImage;
+} LDR_DLL_NOTIFICATION_DATA, *PLDR_DLL_NOTIFICATION_DATA;
+
+typedef VOID (NTAPI *PLDR_DLL_NOTIFICATION_FUNCTION)(
+    ULONG NotificationReason,
+    PLDR_DLL_NOTIFICATION_DATA NotificationData,
+    PVOID Context
+);
+
+typedef NTSTATUS (NTAPI *PLDR_REGISTER_DLL_NOTIFICATION)(
+    ULONG Flags,
+    PLDR_DLL_NOTIFICATION_FUNCTION NotificationFunction,
+    PVOID Context,
+    PVOID *Cookie
+);
+
+typedef NTSTATUS (NTAPI *PLDR_UNREGISTER_DLL_NOTIFICATION)(
+    PVOID Cookie
+);
+
+#define LDR_DLL_NOTIFICATION_REASON_LOADED 1
 
 // =============================================================
 // CONSTANTS
 // =============================================================
 static constexpr const wchar_t* PIPE_NAME  = L"\\\\.\\pipe\\LiveCaptionPipe";
-static constexpr int MODULE_SCAN_RETRIES   = 20;
-static constexpr int MODULE_SCAN_INTERVAL  = 1000;  // ms
+static constexpr size_t QUEUE_MAX_SIZE      = 100;
 
 // Helper to get AppData path for logging
 std::string GetLogPath() {
@@ -31,24 +78,12 @@ std::string GetLogPath() {
 }
 
 static const std::string LOG_PATH = GetLogPath();
+static std::mutex g_logMutex;
 
 // =============================================================
-// PERSISTENT PIPE CLIENT STATE
-// One HANDLE kept alive across all SendToPipe calls.
-// Reconnects lazily on first use or after a write failure.
-// g_pipeCs guards g_hPipe against concurrent hook calls.
-// =============================================================
-static HANDLE         g_hPipe  = INVALID_HANDLE_VALUE;
-static CRITICAL_SECTION g_pipeCs;
-
-
-// =============================================================
-// STRUCTURED LOGGER
-// Level: INFO | WARN | ERROR | FATAL
-// Format: [2026-02-28T00:10:58] [INFO] [Agent] msg
+// STRUCTURED LOGGER (Thread-Safe)
 // =============================================================
 void LogToFile(const char* level, const std::string& msg) {
-    // Get local time for ISO 8601 timestamp
     SYSTEMTIME st;
     GetLocalTime(&st);
 
@@ -66,78 +101,164 @@ void LogToFile(const char* level, const std::string& msg) {
           << "] [Agent] "
           << msg;
 
+    std::lock_guard<std::mutex> lock(g_logMutex);
     std::ofstream logFile(LOG_PATH, std::ios_base::app);
     if (logFile.is_open()) {
         logFile << entry.str() << '\n';
     }
-    // Intentional: do not re-throw if file open fails - hook must never crash target process
 }
 
-// Convenience wrappers matching log-level names
 inline void LogInfo (const std::string& m) { LogToFile("INFO ", m); }
 inline void LogWarn (const std::string& m) { LogToFile("WARN ", m); }
 inline void LogError(const std::string& m) { LogToFile("ERROR", m); }
 inline void LogFatal(const std::string& m) { LogToFile("FATAL", m); }
 
 // =============================================================
-// PIPE WRITER - Persistent connection, lazy reconnect
-//
-// Previous design: CreateFile -> WriteFile -> CloseHandle per packet.
-// Problem: each CloseHandle disconnects the server pipe, triggering
-//          Host's DisconnectNamedPipe + splitter Reset() -> watermark
-//          was zeroed after every packet, making the splitter useless.
-//
-// New design: keep g_hPipe open. On WriteFile failure (broken pipe),
-//             close the stale handle and let the next call reconnect.
+// RAII WRAPPER FOR WINDOWS API HANDLES
 // =============================================================
-void SendToPipe(const std::string& jsonPayload) {
-    EnterCriticalSection(&g_pipeCs);
+class SafeHandle {
+    HANDLE m_handle;
+public:
+    explicit SafeHandle(HANDLE h = INVALID_HANDLE_VALUE) : m_handle(h) {}
+    ~SafeHandle() { Close(); }
 
-    // Lazy connect: attempt only if handle is not yet open
-    if (g_hPipe == INVALID_HANDLE_VALUE) {
-        g_hPipe = CreateFileW(
-            PIPE_NAME,
-            GENERIC_WRITE,
-            0,
-            NULL,
-            OPEN_EXISTING,
-            0,      // Synchronous I/O
-            NULL
-        );
-        if (g_hPipe != INVALID_HANDLE_VALUE) {
-            LogInfo("Pipe connected to Host.");
+    void Close() {
+        if (m_handle != INVALID_HANDLE_VALUE && m_handle != NULL) {
+            CloseHandle(m_handle);
+            m_handle = INVALID_HANDLE_VALUE;
         }
-        // If still INVALID: Host not ready - drop packet silently this call
+    }
+
+    HANDLE Get() const { return m_handle; }
+    void Set(HANDLE h) { Close(); m_handle = h; }
+    bool IsValid() const { return m_handle != INVALID_HANDLE_VALUE && m_handle != NULL; }
+
+    SafeHandle(const SafeHandle&) = delete;
+    SafeHandle& operator=(const SafeHandle&) = delete;
+    SafeHandle(SafeHandle&& other) noexcept : m_handle(other.m_handle) { other.m_handle = INVALID_HANDLE_VALUE; }
+    SafeHandle& operator=(SafeHandle&& other) noexcept {
+        if (this != &other) {
+            Close();
+            m_handle = other.m_handle;
+            other.m_handle = INVALID_HANDLE_VALUE;
+        }
+        return *this;
+    }
+};
+
+// =============================================================
+// BACKGROUND SENDER THREAD & RING BUFFER (BACKPRESSURE POLICY)
+// =============================================================
+static HANDLE                  g_hPipe      = INVALID_HANDLE_VALUE;
+static std::deque<std::string> g_sendQueue;
+static std::mutex              g_queueMutex;
+static std::condition_variable g_queueCv;
+static std::atomic<bool>       g_exitSender{false};
+static SafeHandle              g_hSenderThread;
+
+void PushToQueue(const std::string& payload) {
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    
+    // Backpressure Handling: if queue is full, drop oldest packets to prevent memory bloat
+    if (g_sendQueue.size() >= QUEUE_MAX_SIZE) {
+        g_sendQueue.pop_front();
+    }
+    g_sendQueue.push_back(payload);
+    g_queueCv.notify_one();
+}
+
+DWORD WINAPI SenderThread(LPVOID /*lpParam*/) {
+    LogInfo("SenderThread: Started.");
+    int retryCount = 0;
+
+    while (!g_exitSender) {
+        std::string payload;
+
+        {
+            std::unique_lock<std::mutex> lock(g_queueMutex);
+            g_queueCv.wait(lock, [] { return !g_sendQueue.empty() || g_exitSender; });
+
+            if (g_exitSender && g_sendQueue.empty()) {
+                break;
+            }
+
+            payload = g_sendQueue.front();
+            g_sendQueue.pop_front();
+        }
+
+        bool sent = false;
+        while (!sent && !g_exitSender) {
+            // Lazy connect
+            if (g_hPipe == INVALID_HANDLE_VALUE) {
+                g_hPipe = CreateFileW(
+                    PIPE_NAME,
+                    GENERIC_WRITE,
+                    0,
+                    NULL,
+                    OPEN_EXISTING,
+                    0, // Synchronous writing is safe on this dedicated thread
+                    NULL
+                );
+
+                if (g_hPipe != INVALID_HANDLE_VALUE) {
+                    LogInfo("SenderThread: Named Pipe connected successfully.");
+                    retryCount = 0; // Reset backoff
+                } else {
+                    DWORD err = GetLastError();
+                    // Smart Backoff (Exponential Backoff with Jitter)
+                    retryCount = (std::min)(retryCount + 1, 5); // Max delay ~32s
+                    int backoffMs = (1 << retryCount) * 1000;
+                    
+                    // Simple Jitter (0-500ms)
+                    int jitter = rand() % 500;
+                    backoffMs += jitter;
+
+                    LogWarn("SenderThread: Connection failed (err=" + std::to_string(err) + 
+                            "). Backing off for " + std::to_string(backoffMs) + "ms");
+
+                    int sleepRemain = backoffMs;
+                    while (sleepRemain > 0 && !g_exitSender) {
+                        int chunk = (std::min)(sleepRemain, 200);
+                        Sleep(chunk);
+                        sleepRemain -= chunk;
+                    }
+                    continue; // Retry connection
+                }
+            }
+
+            DWORD written = 0;
+            BOOL ok = WriteFile(
+                g_hPipe,
+                payload.c_str(),
+                static_cast<DWORD>(payload.size()),
+                &written,
+                NULL
+            );
+
+            if (ok) {
+                sent = true;
+            } else {
+                DWORD err = GetLastError();
+                LogWarn("SenderThread: Write failed (err=" + std::to_string(err) + "). Resetting pipe handle.");
+                CloseHandle(g_hPipe);
+                g_hPipe = INVALID_HANDLE_VALUE;
+            }
+        }
     }
 
     if (g_hPipe != INVALID_HANDLE_VALUE) {
-        DWORD written = 0;
-        const BOOL ok = WriteFile(
-            g_hPipe,
-            jsonPayload.c_str(),
-            static_cast<DWORD>(jsonPayload.size()),
-            &written,
-            NULL
-        );
-        if (!ok) {
-            // Broken pipe (Host restarted or crashed): close stale handle.
-            // Next call will reconnect.
-            LogWarn("Pipe write failed (err=" + std::to_string(GetLastError()) +
-                    "). Closing stale handle, will reconnect on next packet.");
-            CloseHandle(g_hPipe);
-            g_hPipe = INVALID_HANDLE_VALUE;
-        }
+        CloseHandle(g_hPipe);
+        g_hPipe = INVALID_HANDLE_VALUE;
     }
 
-    LeaveCriticalSection(&g_pipeCs);
+    LogInfo("SenderThread: Exiting.");
+    return 0;
 }
 
 // Build JSON payload inline to avoid heap allocations on hot path
-// Format: {"text":"...","is_final":true,"bytes":N,"ts_ms":T}
 static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_ms) {
     const size_t text_bytes = strlen(text);
 
-    // Escape any double-quotes in captured text to keep JSON valid
     std::string escaped;
     escaped.reserve(text_bytes);
     for (const char* p = text; *p; ++p) {
@@ -156,20 +277,16 @@ static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_
 }
 
 // =============================================================
-// HELPER: FIND MODULE BY PARTIAL NAME (dynamic scan)
-// Uses vector to avoid C6262 (large stack allocation)
+// HELPER: FIND MODULE BY PARTIAL NAME (Dynamic Scan)
 // =============================================================
 HMODULE FindModuleByPartialName(const std::string& partialName) {
     HANDLE hProcess = GetCurrentProcess();
     DWORD cbNeeded  = 0;
 
-    // First call: query required buffer size
     EnumProcessModules(hProcess, nullptr, 0, &cbNeeded);
     if (cbNeeded == 0) return nullptr;
 
-    // Allocate exactly the right number of slots on heap (fix C6262)
     std::vector<HMODULE> hMods(cbNeeded / sizeof(HMODULE));
-
     if (!EnumProcessModules(hProcess, hMods.data(), cbNeeded, &cbNeeded)) {
         return nullptr;
     }
@@ -182,7 +299,11 @@ HMODULE FindModuleByPartialName(const std::string& partialName) {
         if (!GetModuleFileNameEx(hProcess, hMod, szModName, MAX_PATH)) continue;
 
         std::wstring wName(szModName);
-        std::string  sName(wName.begin(), wName.end());
+        std::string  sName;
+        sName.reserve(wName.size());
+        for (wchar_t wc : wName) {
+            sName.push_back(static_cast<char>(wc));
+        }
         std::transform(sName.begin(), sName.end(), sName.begin(), ::tolower);
 
         if (sName.find(partialLower) != std::string::npos) {
@@ -194,16 +315,14 @@ HMODULE FindModuleByPartialName(const std::string& partialName) {
 
 // =============================================================
 // SPEECH SDK TYPES & HOOKS
-// Ref: Azure Cognitive Services Speech SDK C API
 // =============================================================
 typedef void*  SPXRESULTHANDLE;
 
-// Result reason enum (subset - matches SDK internal values)
 enum Result_Reason : int {
     ResultReason_NoMatch           = 0,
     ResultReason_Canceled          = 1,
-    ResultReason_RecognizingSpeech = 2,  // Partial / intermediate result
-    ResultReason_RecognizedSpeech  = 3,  // Final committed result
+    ResultReason_RecognizingSpeech = 2,
+    ResultReason_RecognizedSpeech  = 3,
     ResultReason_TranslatingSpeech = 6,
     ResultReason_TranslatedSpeech  = 7,
 };
@@ -214,13 +333,11 @@ typedef int(__stdcall* result_get_reason_t)(SPXRESULTHANDLE hresult, int*  pReas
 result_get_text_t   fpOriginalResultGetText   = nullptr;
 result_get_reason_t fpOriginalResultGetReason = nullptr;
 
-// Detour: intercept text + query reason from the same handle
 int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen) {
     const int ret = fpOriginalResultGetText(hresult, buffer, bufferLen);
 
     if (ret != 0 || buffer == nullptr || buffer[0] == '\0') return ret;
 
-    // Query recognition state via SDK API (do NOT guess from punctuation)
     int reason   = ResultReason_RecognizingSpeech;
     bool is_final = false;
 
@@ -235,93 +352,90 @@ int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint
     LogInfo(std::string(is_final ? "FINAL: " : "PARTIAL: ") + buffer);
 
     const std::string payload = BuildJsonPayload(buffer, is_final, ts_ms);
-    SendToPipe(payload);
+    PushToQueue(payload); // Push to background queue, zero latency on target thread
 
     return ret;
 }
 
 // =============================================================
-// HOOK INSTALLATION THREAD
+// HOOK INSTALLATION THREAD (Safe environment outside Loader Lock)
 // =============================================================
-DWORD WINAPI HookThread(LPVOID /*lpParam*/) {
-    LogInfo("Thread started. Scanning for Core DLL handle...");
+DWORD WINAPI HookThread(LPVOID lpParam) {
+    HMODULE hCoreDLL = reinterpret_cast<HMODULE>(lpParam);
+    
+    if (hCoreDLL == nullptr) {
+        // Obfuscate module name
+        char p1[] = { 'm','i','c','r','o','s','o','f','t','.',0 };
+        char p2[] = { 'c','o','g','n','i','t','i','v','e','s','e','r','v','i','c','e','s','.',0 };
+        char p3[] = { 's','p','e','e','c','h','.',0 };
+        char p4[] = { 'c','o','r','e','.',0 };
+        char p5[] = { 'd','l','l',0 };
+        std::string targetDll = std::string(p1) + p2 + p3 + p4 + p5;
 
-    // Phase 1 Mitigation: Obfuscate target DLL name
-    // "microsoft.cognitiveservices.speech.core.dll"
-    char p1[] = { 'm','i','c','r','o','s','o','f','t','.',0 };
-    char p2[] = { 'c','o','g','n','i','t','i','v','e','s','e','r','v','i','c','e','s','.',0 };
-    char p3[] = { 's','p','e','e','c','h','.',0 };
-    char p4[] = { 'c','o','r','e','.',0 };
-    char p5[] = { 'd','l','l',0 };
-    std::string targetDll = std::string(p1) + p2 + p3 + p4 + p5;
-
-    // --- Phase 1: Find core DLL ---
-    HMODULE hCoreDLL = nullptr;
-    for (int retry = 0; retry < MODULE_SCAN_RETRIES && hCoreDLL == nullptr; ++retry) {
         hCoreDLL = FindModuleByPartialName(targetDll);
-        if (hCoreDLL == nullptr) {
-            LogInfo("Scanning for DLL... Retry " + std::to_string(retry + 1)
-                    + "/" + std::to_string(MODULE_SCAN_RETRIES));
-            Sleep(MODULE_SCAN_INTERVAL);
-        }
     }
 
     if (hCoreDLL == nullptr) {
-        LogFatal("Could not find Core DLL handle after all retries.");
+        LogError("HookThread: Core DLL not found.");
         return 0;
     }
-    LogInfo("Core DLL handle found: 0x" + [&] {
-        std::ostringstream ss;
-        ss << std::hex << reinterpret_cast<uintptr_t>(hCoreDLL);
-        return ss.str();
-    }());
 
-    // --- Phase 2: Resolve function addresses ---
+    LogInfo("HookThread: Core DLL found. Resolving exports...");
     FARPROC pGetText   = GetProcAddress(hCoreDLL, "result_get_text");
     FARPROC pGetReason = GetProcAddress(hCoreDLL, "result_get_reason");
 
     if (!pGetText) {
-        LogError("'result_get_text' not found. Module exports may have changed.");
+        LogError("HookThread: 'result_get_text' export not found.");
         return 0;
     }
-    LogInfo("'result_get_text' at: 0x" + [&] {
-        std::ostringstream ss; ss << std::hex << reinterpret_cast<uintptr_t>(pGetText);
-        return ss.str();
-    }());
 
-    if (!pGetReason) {
-        // Non-fatal: is_final detection will default to RecognizingSpeech
-        LogWarn("'result_get_reason' not found. is_final detection disabled.");
-    } else {
-        LogInfo("'result_get_reason' found. is_final detection enabled.");
-    }
-
-    // --- Phase 3: Install hooks ---
     if (MH_Initialize() != MH_OK) {
-        LogError("MH_Initialize failed.");
+        LogError("HookThread: MH_Initialize failed.");
         return 0;
     }
 
     if (MH_CreateHook(reinterpret_cast<LPVOID>(pGetText),
                       &Detour_result_get_text,
                       reinterpret_cast<LPVOID*>(&fpOriginalResultGetText)) != MH_OK) {
-        LogError("MH_CreateHook for result_get_text failed.");
+        LogError("HookThread: MH_CreateHook for result_get_text failed.");
         return 0;
     }
 
     if (pGetReason) {
-        // We do NOT intercept result_get_reason; we only need to call it from within
-        // Detour_result_get_text on the same handle. Direct cast is correct here.
         fpOriginalResultGetReason = reinterpret_cast<result_get_reason_t>(pGetReason);
+        LogInfo("HookThread: 'result_get_reason' resolved.");
     }
 
     if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
-        LogError("MH_EnableHook failed.");
+        LogError("HookThread: MH_EnableHook failed.");
         return 0;
     }
 
-    LogInfo("HOOK ENABLED. Waiting for captions...");
+    LogInfo("HookThread: Hooks enabled successfully.");
     return 0;
+}
+
+// =============================================================
+// ZERO-INVASIVE DLL NOTIFICATION CALLBACK
+// =============================================================
+static PVOID g_ldrCookie = nullptr;
+static std::atomic<bool> g_hookInstalled{false};
+
+VOID NTAPI DllNotificationCallback(ULONG NotificationReason, PLDR_DLL_NOTIFICATION_DATA NotificationData, PVOID /*Context*/) {
+    if (NotificationReason == LDR_DLL_NOTIFICATION_REASON_LOADED) {
+        if (NotificationData && NotificationData->BaseDllName && NotificationData->BaseDllName->Buffer) {
+            std::wstring dllName(NotificationData->BaseDllName->Buffer, NotificationData->BaseDllName->Length / sizeof(wchar_t));
+            std::transform(dllName.begin(), dllName.end(), dllName.begin(), ::tolower);
+            
+            if (dllName.find(L"microsoft.cognitiveservices.speech.core.dll") != std::wstring::npos) {
+                if (!g_hookInstalled.exchange(true)) {
+                    LogInfo("DllNotification: Target DLL loaded. Launching HookThread.");
+                    // Start hook thread outside of Loader Lock
+                    CreateThread(NULL, 0, HookThread, NotificationData->DllBase, 0, NULL);
+                }
+            }
+        }
+    }
 }
 
 // =============================================================
@@ -331,26 +445,70 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
 
-        InitializeCriticalSection(&g_pipeCs);
-
-        // Truncate log file at the start of each new session
+        // Truncate log file at session start
         {
             std::ofstream logFile(LOG_PATH, std::ios_base::trunc);
             logFile << "[Agent] === New Session Started ===\n";
         }
 
-        LogInfo("DLL_PROCESS_ATTACH. Launching hook thread.");
-        CreateThread(NULL, 0, HookThread, NULL, 0, NULL);
+        LogInfo("DllMain: DLL_PROCESS_ATTACH.");
+
+        // Start background sender thread
+        g_hSenderThread.Set(CreateThread(NULL, 0, SenderThread, NULL, 0, NULL));
+
+        // Register DLL notification to hook dynamically without active scanning
+        HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+        if (hNtDll) {
+            auto pLdrRegisterDllNotification = reinterpret_cast<PLDR_REGISTER_DLL_NOTIFICATION>(
+                GetProcAddress(hNtDll, "LdrRegisterDllNotification")
+            );
+            if (pLdrRegisterDllNotification) {
+                pLdrRegisterDllNotification(0, DllNotificationCallback, NULL, &g_ldrCookie);
+                LogInfo("DllMain: Registered DLL notification callback.");
+            }
+        }
+
+        // Edge case: DLL might be already loaded before we registered the callback
+        char p1[] = { 'm','i','c','r','o','s','o','f','t','.',0 };
+        char p2[] = { 'c','o','g','n','i','t','i','v','e','s','e','r','v','i','c','e','s','.',0 };
+        char p3[] = { 's','p','e','e','c','h','.',0 };
+        char p4[] = { 'c','o','r','e','.',0 };
+        char p5[] = { 'd','l','l',0 };
+        std::string targetDll = std::string(p1) + p2 + p3 + p4 + p5;
+
+        HMODULE hCoreDLL = FindModuleByPartialName(targetDll);
+        if (hCoreDLL != nullptr) {
+            if (!g_hookInstalled.exchange(true)) {
+                LogInfo("DllMain: Core DLL already loaded. Launching HookThread.");
+                CreateThread(NULL, 0, HookThread, hCoreDLL, 0, NULL);
+            }
+        }
     }
     else if (ul_reason_for_call == DLL_PROCESS_DETACH) {
-        // Release persistent pipe handle on unload
-        EnterCriticalSection(&g_pipeCs);
-        if (g_hPipe != INVALID_HANDLE_VALUE) {
-            CloseHandle(g_hPipe);
-            g_hPipe = INVALID_HANDLE_VALUE;
+        LogInfo("DllMain: DLL_PROCESS_DETACH. Unloading...");
+
+        // Unregister DLL notification callback
+        HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+        if (hNtDll && g_ldrCookie) {
+            auto pLdrUnregisterDllNotification = reinterpret_cast<PLDR_UNREGISTER_DLL_NOTIFICATION>(
+                GetProcAddress(hNtDll, "LdrUnregisterDllNotification")
+            );
+            if (pLdrUnregisterDllNotification) {
+                pLdrUnregisterDllNotification(g_ldrCookie);
+            }
         }
-        LeaveCriticalSection(&g_pipeCs);
-        DeleteCriticalSection(&g_pipeCs);
+
+        // Signal sender thread to exit and wait
+        g_exitSender = true;
+        g_queueCv.notify_all();
+        if (g_hSenderThread.IsValid()) {
+            WaitForSingleObject(g_hSenderThread.Get(), 1000);
+            g_hSenderThread.Close();
+        }
+
+        MH_DisableHook(MH_ALL_HOOKS);
+        MH_Uninitialize();
+        LogInfo("DllMain: Hook uninstalled, agent detached.");
     }
     return TRUE;
 }
