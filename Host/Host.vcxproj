@@ -22,7 +22,7 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{787168f5-38d7-43ad-8989-f7f1b88e34ad}</ProjectGuid>
-    <RootNamespace>Loader</RootNamespace>
+    <RootNamespace>Host</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -125,13 +125,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Loader.cpp" />
+    <ClCompile Include="Host.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="Loader.rc" />
+    <ResourceCompile Include="Host.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Manifest Include="Loader.manifest" />
+    <Manifest Include="Host.manifest" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

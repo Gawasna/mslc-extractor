@@ -3,10 +3,10 @@
   <assemblyIdentity
       version="1.0.0.0"
       processorArchitecture="*"
-      name="MSLC.Extractor.Loader"
+      name="MSLC.Extractor.Host"
       type="win32"
   />
-  <description>Live Caption Extractor Loader</description>
+  <description>Live Caption Extractor Host</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

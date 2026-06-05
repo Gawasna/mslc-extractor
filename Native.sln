@@ -1,11 +1,11 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36908.2 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Loader", "Loader\Loader.vcxproj", "{787168F5-38D7-43AD-8989-F7F1B88E34AD}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Host", "Host\Host.vcxproj", "{787168F5-38D7-43AD-8989-F7F1B88E34AD}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "HookCore", "HookCore\HookCore.vcxproj", "{24ECEF9D-9DA2-41EF-999B-535B0D2E7846}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Agent", "Agent\Agent.vcxproj", "{24ECEF9D-9DA2-41EF-999B-535B0D2E7846}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

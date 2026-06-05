@@ -22,24 +22,24 @@ std::string GetLogPath() {
     char path[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
         std::string fullPath = path;
-        fullPath += "\\mslc_loader_debug.txt";
+        fullPath += "\\mslc_host_debug.txt";
         return fullPath;
     }
-    return "C:\\Users\\Public\\mslc_loader_debug.txt"; // Fallback
+    return "C:\\Users\\Public\\mslc_host_debug.txt"; // Fallback
 }
 
 // =============================================================
-// LOADER DEBUG LOGGER
+// HOST DEBUG LOGGER
 // Keeps a rolling window of the last LOG_MAX_LINES log entries.
 // Each write flushes the full ring to disk (file stays small: <=100 lines).
-// Log file: %LOCALAPPDATA%\mslc_loader_debug.txt
+// Log file: %LOCALAPPDATA%\mslc_host_debug.txt
 // =============================================================
-static const std::string     LOADER_LOG_PATH   = GetLogPath();
+static const std::string     HOST_LOG_PATH     = GetLogPath();
 static constexpr size_t      LOG_MAX_LINES     = 100;
 static CRITICAL_SECTION      g_logCs;
 static std::deque<std::string> g_logRing;
 
-void LogLoader(const char* category, const std::string& msg) {
+void LogHost(const char* category, const std::string& msg) {
     SYSTEMTIME st;
     GetLocalTime(&st);
 
@@ -62,7 +62,7 @@ void LogLoader(const char* category, const std::string& msg) {
 
     // Rewrite full ring to disk on every call.
     // File is at most ~8KB (100 lines x ~80 chars) - acceptable for debug.
-    std::ofstream f(LOADER_LOG_PATH, std::ios_base::trunc);
+    std::ofstream f(HOST_LOG_PATH, std::ios_base::trunc);
     if (f.is_open()) {
         for (const auto& line : g_logRing) f << line << '\n';
     }
@@ -141,7 +141,7 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
 
     HANDLE hProcess = OpenProcess(dwDesiredAccess, FALSE, pid);
     if (!hProcess) {
-        LogLoader("INJECT", "OpenProcess failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "OpenProcess failed (err=" + std::to_string(GetLastError()) + ")");
         return false;
     }
 
@@ -175,13 +175,13 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
     void* remoteMem = pVirtualAllocEx(hProcess, nullptr, allocSize,
                                      MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteMem) {
-        LogLoader("INJECT", "VirtualAllocEx failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "VirtualAllocEx failed (err=" + std::to_string(GetLastError()) + ")");
         CloseHandle(hProcess);
         return false;
     }
 
     if (!pWriteProcessMemory(hProcess, remoteMem, dllPath.c_str(), allocSize, nullptr)) {
-        LogLoader("INJECT", "WriteProcessMemory failed (err=" + std::to_string(GetLastError()) + ")");
+        LogHost("INJECT", "WriteProcessMemory failed (err=" + std::to_string(GetLastError()) + ")");
         VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return false;
@@ -198,7 +198,7 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
         return true;
     }
 
-    LogLoader("INJECT", "CreateRemoteThread failed (err=" + std::to_string(GetLastError()) + ")");
+    LogHost("INJECT", "CreateRemoteThread failed (err=" + std::to_string(GetLastError()) + ")");
     VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
     CloseHandle(hProcess);
     return false;
@@ -207,42 +207,32 @@ bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
 // =============================================================
 // MAIN ENTRY
 // =============================================================
-int main() {
+int wmain(int argc, wchar_t* argv[]) {
     InitializeCriticalSection(&g_logCs);
-    LogLoader("SESSION", "=== Loader started ===");
+    LogHost("SESSION", "=== Host started ===");
 
-    // Resolve DLL path relative to this executable
     wchar_t exePath[MAX_PATH] = {};
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     std::wstring strPath(exePath);
-    std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\HookCore.dll";
+    std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\Agent.dll";
 
-    // Discovery and injection loop
     DWORD pid = 0;
-    while (true) {
-        pid = GetProcessIdByName(TARGET_APP);
-        
-        if (pid == 0) {
-            // Process not found, wait and retry
-            Sleep(2000);
-            continue;
-        }
 
-        // Process found
-        LogLoader("INJECT", "LiveCaptions.exe found (PID: " + std::to_string(pid) + ")");
-        
-        if (InjectDLL(pid, dllPath)) {
-            // Injection succeeded
-            LogLoader("INJECT", "HookCore.dll injected successfully");
-            LogLoader("SESSION", "=== Loader exiting ===");
-            break;
-        } else {
-            // Injection failed, retry
-            LogLoader("INJECT", "Injection failed, retrying in 2 seconds");
-            Sleep(2000);
+    if (argc >= 2) {
+        pid = static_cast<DWORD>(_wtoi(argv[1]));
+        LogHost("SESSION", "PID from argument: " + std::to_string(pid));
+    }
+
+    if (pid == 0) {
+        LogHost("SESSION", "No PID argument, scanning...");
+        while (pid == 0) {
+            pid = GetProcessIdByName(TARGET_APP);
+            if (pid == 0) Sleep(2000);
         }
     }
 
+    const bool ok = InjectDLL(pid, dllPath);
+    LogHost("SESSION", ok ? "Inject OK. Exiting." : "Inject FAILED. Exiting.");
     DeleteCriticalSection(&g_logCs);
-    return 0;
+    return ok ? 0 : 1;
 }

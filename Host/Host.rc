@@ -19,11 +19,11 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "MSLC Project"
-            VALUE "FileDescription", "Live Caption Extractor Loader"
+            VALUE "FileDescription", "Live Caption Extractor Host"
             VALUE "FileVersion", "1.0.0.1"
-            VALUE "InternalName", "Loader.exe"
+            VALUE "InternalName", "Host.exe"
             VALUE "LegalCopyright", "Copyright (C) 2026 MSLC Project"
-            VALUE "OriginalFilename", "Loader.exe"
+            VALUE "OriginalFilename", "Host.exe"
             VALUE "ProductName", "Live Caption Extractor"
             VALUE "ProductVersion", "1.0.0.1"
         END

@@ -24,10 +24,10 @@ std::string GetLogPath() {
     char path[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path))) {
         std::string fullPath = path;
-        fullPath += "\\mslc_hook_debug.txt";
+        fullPath += "\\mslc_agent_debug.txt";
         return fullPath;
     }
-    return "C:\\Users\\Public\\mslc_hook_debug.txt"; // Fallback
+    return "C:\\Users\\Public\\mslc_agent_debug.txt"; // Fallback
 }
 
 static const std::string LOG_PATH = GetLogPath();
@@ -45,7 +45,7 @@ static CRITICAL_SECTION g_pipeCs;
 // =============================================================
 // STRUCTURED LOGGER
 // Level: INFO | WARN | ERROR | FATAL
-// Format: [2026-02-28T00:10:58] [INFO] [HookCore] msg
+// Format: [2026-02-28T00:10:58] [INFO] [Agent] msg
 // =============================================================
 void LogToFile(const char* level, const std::string& msg) {
     // Get local time for ISO 8601 timestamp
@@ -63,7 +63,7 @@ void LogToFile(const char* level, const std::string& msg) {
           << std::setw(2) << st.wSecond
           << "] ["
           << level
-          << "] [HookCore] "
+          << "] [Agent] "
           << msg;
 
     std::ofstream logFile(LOG_PATH, std::ios_base::app);
@@ -84,7 +84,7 @@ inline void LogFatal(const std::string& m) { LogToFile("FATAL", m); }
 //
 // Previous design: CreateFile -> WriteFile -> CloseHandle per packet.
 // Problem: each CloseHandle disconnects the server pipe, triggering
-//          Loader's DisconnectNamedPipe + splitter Reset() -> watermark
+//          Host's DisconnectNamedPipe + splitter Reset() -> watermark
 //          was zeroed after every packet, making the splitter useless.
 //
 // New design: keep g_hPipe open. On WriteFile failure (broken pipe),
@@ -105,9 +105,9 @@ void SendToPipe(const std::string& jsonPayload) {
             NULL
         );
         if (g_hPipe != INVALID_HANDLE_VALUE) {
-            LogInfo("Pipe connected to Loader.");
+            LogInfo("Pipe connected to Host.");
         }
-        // If still INVALID: Loader not ready - drop packet silently this call
+        // If still INVALID: Host not ready - drop packet silently this call
     }
 
     if (g_hPipe != INVALID_HANDLE_VALUE) {
@@ -120,7 +120,7 @@ void SendToPipe(const std::string& jsonPayload) {
             NULL
         );
         if (!ok) {
-            // Broken pipe (Loader restarted or crashed): close stale handle.
+            // Broken pipe (Host restarted or crashed): close stale handle.
             // Next call will reconnect.
             LogWarn("Pipe write failed (err=" + std::to_string(GetLastError()) +
                     "). Closing stale handle, will reconnect on next packet.");
@@ -336,7 +336,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         // Truncate log file at the start of each new session
         {
             std::ofstream logFile(LOG_PATH, std::ios_base::trunc);
-            logFile << "[HookCore] === New Session Started ===\n";
+            logFile << "[Agent] === New Session Started ===\n";
         }
 
         LogInfo("DLL_PROCESS_ATTACH. Launching hook thread.");
