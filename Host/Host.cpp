@@ -26,7 +26,8 @@
 // =============================================================
 static constexpr const wchar_t* TARGET_APP  = L"LiveCaptions.exe";
 
-static DWORD g_targetPid = 0;
+static std::atomic<DWORD> g_targetPid{0};
+static std::atomic<bool>  g_needReinjection{false};
 static std::wstring g_customPipeName = L"\\\\.\\pipe\\LiveCaptionPipe";
 static bool g_debugMode = false;
 static std::string g_customLogPath = "";
@@ -460,6 +461,30 @@ void PipeListener() {
             std::lock_guard<std::mutex> lock(g_csMutex);
             g_splitter.Reset();
         }
+
+        // Check if the target process crashed or terminated
+        if (!g_mockMode && g_targetPid != 0) {
+            SafeHandle shProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, g_targetPid));
+            bool isProcessDead = true;
+            if (shProcess.IsValid()) {
+                DWORD exitCode = 0;
+                if (GetExitCodeProcess(shProcess.Get(), &exitCode)) {
+                    if (exitCode == STILL_ACTIVE) {
+                        isProcessDead = false;
+                    }
+                }
+            }
+
+            if (isProcessDead) {
+                LogHost("PIPE", "LiveCaptions.exe (PID: " + std::to_string(g_targetPid) + ") has terminated or crashed.");
+                if (!g_stdoutOnly) {
+                    ClearLiveText();
+                    std::wcout << L"[-] LiveCaptions.exe (PID: " << g_targetPid << L") terminated or crashed. Re-discovery initiated..." << std::endl;
+                }
+                g_needReinjection = true;
+                g_queueCv.notify_all();
+            }
+        }
     }
 
     if (pSD) {
@@ -798,164 +823,187 @@ int main(int argc, char* argv[]) {
         mockThread.detach();
     }
 
-    // 6. Discovery & Injection (skipped in Mock Mode)
-    if (!g_mockMode) {
-        if (!g_stdoutOnly && !g_injectOnly) {
-            std::wcout << L"[*] Waiting for LiveCaptions.exe..." << std::endl;
-        }
-
-        wchar_t exePath[MAX_PATH] = {};
-        GetModuleFileNameW(NULL, exePath, MAX_PATH);
-        std::wstring strPath(exePath);
-        std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\Agent.dll";
-
-        DWORD pid = g_targetPid;
-        bool settingsOpened = false;
-
-        while (true) {
-            if (pid == 0) {
-                pid = GetProcessIdByName(TARGET_APP);
+    // 6. Main Connection & Lifecycle Loop
+    while (!g_exitHost) {
+        // Discovery & Injection (skipped in Mock Mode)
+        if (!g_mockMode) {
+            if (!g_stdoutOnly && !g_injectOnly) {
+                std::wcout << L"[*] Waiting for LiveCaptions.exe..." << std::endl;
             }
 
-            if (pid != 0) {
-                if (!g_stdoutOnly && !g_injectOnly) {
-                    std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting..." << std::endl;
+            wchar_t exePath[MAX_PATH] = {};
+            GetModuleFileNameW(NULL, exePath, MAX_PATH);
+            std::wstring strPath(exePath);
+            std::wstring dllPath = strPath.substr(0, strPath.find_last_of(L"\\")) + L"\\Agent.dll";
+
+            DWORD pid = g_targetPid;
+            bool settingsOpened = false;
+
+            while (!g_exitHost) {
+                if (pid == 0) {
+                    pid = GetProcessIdByName(TARGET_APP);
+                }
+
+                if (pid != 0) {
+                    if (!g_stdoutOnly && !g_injectOnly) {
+                        std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting..." << std::endl;
+                    }
+                    
+                    if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
+                        if (!g_stdoutOnly && !g_injectOnly) {
+                            std::wcout << L"[+] Agent.dll already injected. Listening..." << std::endl;
+                        }
+                        g_targetPid = pid;
+                        break;
+                    }
+
+                    if (InjectDLL(pid, dllPath)) {
+                        if (!g_stdoutOnly && !g_injectOnly) {
+                            std::wcout << L"[+] Agent.dll injected successfully. Listening..." << std::endl;
+                        }
+                        g_targetPid = pid;
+                        break;
+                    } else {
+                        if (!g_stdoutOnly && !g_injectOnly) {
+                            std::wcout << L"[-] Injection failed. Retrying in 2s..." << std::endl;
+                        }
+                        Sleep(2000);
+                    }
+                } else {
+                    if (g_injectOnly) {
+                        Sleep(2000);
+                        continue;
+                    }
+
+                    if (!g_noSpawn && !settingsOpened) {
+                        ShellExecuteW(NULL, L"open", L"ms-settings:privacy-livecaptions", NULL, NULL, SW_SHOWNORMAL);
+                        settingsOpened = true;
+                        LogHost("DISCOVERY", "ShellExecute initiated to open Live Captions Settings.");
+                    }
+                    Sleep(2000);
+                }
+            }
+
+            if (g_injectOnly) {
+                LogHost("SESSION", "Inject-only mode completed. Exiting.");
+                return 0;
+            }
+        } else {
+            if (!g_stdoutOnly) {
+                std::wcout << L"[Mock Mode] Verification UI running..." << std::endl;
+            }
+        }
+
+        // Reset re-injection flag before entering consumer loop
+        g_needReinjection = false;
+
+        // 7. Consumer Loop: Handles UTF-16 Conversion, JSON Parsing, Logic and rendering
+        while (!g_exitHost && !g_needReinjection) {
+            RawPacket rawPkt;
+            {
+                std::unique_lock<std::mutex> lock(g_queueMutex);
+                g_queueCv.wait_for(lock, std::chrono::milliseconds(500), [] { 
+                    return !g_packetQueue.empty() || g_exitHost || g_needReinjection; 
+                });
+
+                if (g_exitHost) {
+                    break;
                 }
                 
-                if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
-                    if (!g_stdoutOnly && !g_injectOnly) {
-                        std::wcout << L"[+] Agent.dll already injected. Listening..." << std::endl;
-                    }
+                if (g_needReinjection) {
                     break;
                 }
 
-                if (InjectDLL(pid, dllPath)) {
-                    if (!g_stdoutOnly && !g_injectOnly) {
-                        std::wcout << L"[+] Agent.dll injected successfully. Listening..." << std::endl;
-                    }
-                    break;
-                } else {
-                    if (!g_stdoutOnly && !g_injectOnly) {
-                        std::wcout << L"[-] Injection failed. Retrying in 2s..." << std::endl;
-                    }
-                    Sleep(2000);
-                }
-            } else {
-                if (g_injectOnly) {
-                    Sleep(2000);
+                if (g_packetQueue.empty()) {
                     continue;
                 }
 
-                if (!g_noSpawn && !settingsOpened) {
-                    ShellExecuteW(NULL, L"open", L"ms-settings:privacy-livecaptions", NULL, NULL, SW_SHOWNORMAL);
-                    settingsOpened = true;
-                    LogHost("DISCOVERY", "ShellExecute initiated to open Live Captions Settings.");
-                }
-                Sleep(2000);
-            }
-        }
-
-        if (g_injectOnly) {
-            LogHost("SESSION", "Inject-only mode completed. Exiting.");
-            return 0;
-        }
-    } else {
-        if (!g_stdoutOnly) {
-            std::wcout << L"[Mock Mode] Verification UI running..." << std::endl;
-        }
-    }
-
-    // 7. Consumer Loop: Handles UTF-16 Conversion, JSON Parsing, Logic and rendering
-    while (!g_exitHost) {
-        RawPacket rawPkt;
-        {
-            std::unique_lock<std::mutex> lock(g_queueMutex);
-            g_queueCv.wait(lock, [] { return !g_packetQueue.empty() || g_exitHost; });
-
-            if (g_exitHost && g_packetQueue.empty()) {
-                break;
+                rawPkt = g_packetQueue.front();
+                g_packetQueue.pop_front();
             }
 
-            rawPkt = g_packetQueue.front();
-            g_packetQueue.pop_front();
-        }
-
-        if (g_stdoutOnly) {
-            // Direct stdout JSON streaming
-            std::cout << rawPkt.data << std::endl;
-            continue;
-        }
-
-        int wideLen = MultiByteToWideChar(CP_UTF8, 0, rawPkt.data.c_str(), -1, nullptr, 0);
-        if (wideLen <= 0) continue;
-
-        std::vector<wchar_t> wideBuf(wideLen);
-        MultiByteToWideChar(CP_UTF8, 0, rawPkt.data.c_str(), -1, wideBuf.data(), wideLen);
-
-        PipePacket pkt;
-        if (!ParsePacket(wideBuf.data(), pkt) || pkt.text.empty()) {
-            continue;
-        }
-
-        const DWORD64 delayMs = (pkt.ts_ms > 0 && rawPkt.recvTick >= pkt.ts_ms)
-            ? (rawPkt.recvTick - pkt.ts_ms)
-            : 0;
-
-        // Convert result_id to narrow string for logging
-        std::string narrowId(pkt.result_id.begin(), pkt.result_id.end());
-        LogHost("PKT", std::string(pkt.is_final ? "FINAL  " : "PARTIAL") + 
-                  " text_len=" + std::to_string(pkt.text.size()) + 
-                  " delay=" + std::to_string(delayMs) + "ms" +
-                  " id=" + narrowId +
-                  " offset=" + std::to_string(pkt.offset) +
-                  " duration=" + std::to_string(pkt.duration));
-
-        {
-            std::lock_guard<std::mutex> lock(g_csMutex);
-
-            g_pktCount++;
-            g_totalBytes  += pkt.bytes;
-            g_lastDelayMs  = delayMs;
-            FormatTimestamp(rawPkt.recvTick, g_lastTs, 20);
-
-            // Extract new sentences via Splitter
-            auto sentences = g_splitter.ExtractNewSentences(pkt.text, pkt.is_final);
-            if (!sentences.empty()) {
-                // Clear the current live line first to avoid character leftover
-                ClearLiveText();
-
-                for (const std::wstring& s : sentences) {
-                    ++g_splitter.sentence_idx;
-                    std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s << std::endl;
-                }
-
-                // Output stats immediately after COMMIT
-                const DWORD64 avg = (g_pktCount > 0) ? (g_totalBytes / g_pktCount) : 0;
-                std::wcout << L"[STATS] Pkts: " << g_pktCount
-                           << L" | Bytes: " << g_totalBytes
-                           << L" | Avg: " << avg << L" B"
-                           << L" | Delay: " << g_lastDelayMs << L" ms"
-                           << L" | Last: " << g_lastTs
-                           << std::endl;
+            if (g_stdoutOnly) {
+                // Direct stdout JSON streaming
+                std::cout << rawPkt.data << std::endl;
+                continue;
             }
 
-            // Display remaining live text
-            if (!pkt.is_final) {
-                std::wstring liveText = pkt.text;
-                if (g_splitter.confirmed_len < liveText.size()) {
-                    liveText = liveText.substr(g_splitter.confirmed_len);
-                    size_t start = liveText.find_first_not_of(L' ');
-                    if (start != std::wstring::npos) {
-                        liveText = liveText.substr(start);
+            int wideLen = MultiByteToWideChar(CP_UTF8, 0, rawPkt.data.c_str(), -1, nullptr, 0);
+            if (wideLen <= 0) continue;
+
+            std::vector<wchar_t> wideBuf(wideLen);
+            MultiByteToWideChar(CP_UTF8, 0, rawPkt.data.c_str(), -1, wideBuf.data(), wideLen);
+
+            PipePacket pkt;
+            if (!ParsePacket(wideBuf.data(), pkt) || pkt.text.empty()) {
+                continue;
+            }
+
+            const DWORD64 delayMs = (pkt.ts_ms > 0 && rawPkt.recvTick >= pkt.ts_ms)
+                ? (rawPkt.recvTick - pkt.ts_ms)
+                : 0;
+
+            // Convert result_id to narrow string for logging
+            std::string narrowId(pkt.result_id.begin(), pkt.result_id.end());
+            LogHost("PKT", std::string(pkt.is_final ? "FINAL  " : "PARTIAL") + 
+                      " text_len=" + std::to_string(pkt.text.size()) + 
+                      " delay=" + std::to_string(delayMs) + "ms" +
+                      " id=" + narrowId +
+                      " offset=" + std::to_string(pkt.offset) +
+                      " duration=" + std::to_string(pkt.duration));
+
+            {
+                std::lock_guard<std::mutex> lock(g_csMutex);
+
+                g_pktCount++;
+                g_totalBytes  += pkt.bytes;
+                g_lastDelayMs  = delayMs;
+                FormatTimestamp(rawPkt.recvTick, g_lastTs, 20);
+
+                // Extract new sentences via Splitter
+                auto sentences = g_splitter.ExtractNewSentences(pkt.text, pkt.is_final);
+                if (!sentences.empty()) {
+                    // Clear the current live line first to avoid character leftover
+                    ClearLiveText();
+
+                    for (const std::wstring& s : sentences) {
+                        ++g_splitter.sentence_idx;
+                        std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s << std::endl;
                     }
-                } else {
-                    liveText.clear();
+
+                    // Output stats immediately after COMMIT
+                    const DWORD64 avg = (g_pktCount > 0) ? (g_totalBytes / g_pktCount) : 0;
+                    std::wcout << L"[STATS] Pkts: " << g_pktCount
+                               << L" | Bytes: " << g_totalBytes
+                               << L" | Avg: " << avg << L" B"
+                               << L" | Delay: " << g_lastDelayMs << L" ms"
+                               << L" | Last: " << g_lastTs
+                               << std::endl;
                 }
-                PrintLiveText(liveText);
-            } else {
-                // If it is final, make sure to clean up the live line
-                ClearLiveText();
+
+                // Display remaining live text
+                if (!pkt.is_final) {
+                    std::wstring liveText = pkt.text;
+                    if (g_splitter.confirmed_len < liveText.size()) {
+                        liveText = liveText.substr(g_splitter.confirmed_len);
+                        size_t start = liveText.find_first_not_of(L' ');
+                        if (start != std::wstring::npos) {
+                            liveText = liveText.substr(start);
+                        }
+                    } else {
+                        liveText.clear();
+                    }
+                    PrintLiveText(liveText);
+                } else {
+                    // If it is final, make sure to clean up the live line
+                    ClearLiveText();
+                }
             }
+        }
+
+        // If we exited the consumer loop due to reinjection, reset target PID to trigger re-discovery
+        if (g_needReinjection && !g_mockMode) {
+            g_targetPid = 0;
         }
     }
 
