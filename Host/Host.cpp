@@ -838,6 +838,7 @@ int main(int argc, char* argv[]) {
 
             DWORD pid = g_targetPid;
             bool settingsOpened = false;
+            int injectRetries = 0;
 
             while (!g_exitHost) {
                 if (pid == 0) {
@@ -864,6 +865,14 @@ int main(int argc, char* argv[]) {
                         g_targetPid = pid;
                         break;
                     } else {
+                        injectRetries++;
+                        if (injectRetries >= 3) {
+                            if (!g_stdoutOnly && !g_injectOnly) {
+                                std::wcout << L"[-] Injection failed 3 times. Return feedback only and aborting." << std::endl;
+                            }
+                            LogHost("INJECT", "Injection failed 3 times. Aborting.");
+                            return 1; // Abort process on failure
+                        }
                         if (!g_stdoutOnly && !g_injectOnly) {
                             std::wcout << L"[-] Injection failed. Retrying in 2s..." << std::endl;
                         }
