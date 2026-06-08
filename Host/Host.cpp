@@ -978,7 +978,14 @@ int main(int argc, char* argv[]) {
 
                     for (const std::wstring& s : sentences) {
                         ++g_splitter.sentence_idx;
-                        std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s << std::endl;
+                        double offset_sec = static_cast<double>(pkt.offset) / 10000000.0;
+                        double duration_sec = static_cast<double>(pkt.duration) / 10000000.0;
+
+                        std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s 
+                                   << L" (offset: " << std::fixed << std::setprecision(2) << offset_sec << L"s"
+                                   << L", duration: " << duration_sec << L"s"
+                                   << L", id: " << pkt.result_id << L")"
+                                   << std::endl;
                     }
 
                     // Output stats immediately after COMMIT
