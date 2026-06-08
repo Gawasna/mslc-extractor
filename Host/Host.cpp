@@ -272,9 +272,22 @@ struct SentenceSplitter {
     std::vector<std::wstring> ExtractNewSentences(const std::wstring& text, bool is_final) {
         std::vector<std::wstring> results;
 
-        if (text.size() < prev_text.size()) {
+        // Real Regression Detection: Only trigger reset if already-confirmed prefix is modified or truncated
+        bool is_regression = false;
+        if (confirmed_len > 0) {
+            if (text.size() < confirmed_len) {
+                is_regression = true;
+            } else {
+                std::wstring confirmed_prefix = prev_text.substr(0, confirmed_len);
+                if (text.compare(0, confirmed_len, confirmed_prefix) != 0) {
+                    is_regression = true;
+                }
+            }
+        }
+
+        if (is_regression) {
             LogHost("SPLITTER",
-                "REGRESSION detected: prev_len=" + std::to_string(prev_text.size()) +
+                "REAL REGRESSION detected at confirmed prefix. prev_len=" + std::to_string(prev_text.size()) +
                 " new_len=" + std::to_string(text.size()) + " -> RESET watermark");
             Reset();
         }
@@ -286,10 +299,22 @@ struct SentenceSplitter {
             if (start != std::wstring::npos) tail = tail.substr(start);
 
             if (!tail.empty()) {
-                LogHost("SPLITTER",
-                    "FINAL tail_len=" + std::to_string(tail.size()) +
-                    " tail=\"" + TruncateForLog(tail) + "\" -> COMMIT");
-                results.push_back(tail);
+                // Filter punctuation-only tail
+                bool has_alnum = false;
+                for (wchar_t wc : tail) {
+                    if (iswalnum(wc)) {
+                        has_alnum = true;
+                        break;
+                    }
+                }
+                if (has_alnum) {
+                    LogHost("SPLITTER",
+                        "FINAL tail_len=" + std::to_string(tail.size()) +
+                        " tail=\"" + TruncateForLog(tail) + "\" -> COMMIT");
+                    results.push_back(tail);
+                } else {
+                    LogHost("SPLITTER", "Filtered empty/punctuation-only final tail: \"" + TruncateForLog(tail) + "\"");
+                }
             }
             confirmed_len = text.size();
             prev_text = text;
@@ -313,8 +338,20 @@ struct SentenceSplitter {
                     if (trim != std::wstring::npos && trim > 0) sentence = sentence.substr(trim);
 
                     if (!sentence.empty()) {
-                        LogHost("EMIT", "Emitting sentence: \"" + TruncateForLog(sentence) + "\"");
-                        results.push_back(sentence);
+                        // Filter out sentences containing only punctuation/spaces
+                        bool has_alnum = false;
+                        for (wchar_t wc : sentence) {
+                            if (iswalnum(wc)) {
+                                has_alnum = true;
+                                break;
+                            }
+                        }
+                        if (has_alnum) {
+                            LogHost("EMIT", "Emitting sentence: \"" + TruncateForLog(sentence) + "\"");
+                            results.push_back(sentence);
+                        } else {
+                            LogHost("SPLITTER", "Filtered empty/punctuation-only sentence: \"" + TruncateForLog(sentence) + "\"");
+                        }
                     }
                     commit_pos = scan_pos + 1;
                 }
