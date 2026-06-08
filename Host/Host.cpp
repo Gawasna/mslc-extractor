@@ -261,35 +261,30 @@ struct SentenceSplitter {
     std::wstring prev_text;
     size_t       confirmed_len;
     int          sentence_idx;
+    uint64_t     last_offset;
 
-    SentenceSplitter() : confirmed_len(0), sentence_idx(0) {}
+    SentenceSplitter() : confirmed_len(0), sentence_idx(0), last_offset(0) {}
 
     void Reset() {
         prev_text.clear();
         confirmed_len = 0;
+        last_offset = 0;
     }
 
-    std::vector<std::wstring> ExtractNewSentences(const std::wstring& text, bool is_final) {
+    std::vector<std::wstring> ExtractNewSentences(const std::wstring& text, bool is_final, uint64_t offset) {
         std::vector<std::wstring> results;
 
-        // Real Regression Detection: Only trigger reset if already-confirmed prefix is modified or truncated
-        bool is_regression = false;
-        if (confirmed_len > 0) {
-            if (text.size() < confirmed_len) {
-                is_regression = true;
-            } else {
-                std::wstring confirmed_prefix = prev_text.substr(0, confirmed_len);
-                if (text.compare(0, confirmed_len, confirmed_prefix) != 0) {
-                    is_regression = true;
-                }
-            }
-        }
-
-        if (is_regression) {
-            LogHost("SPLITTER",
-                "REAL REGRESSION detected at confirmed prefix. prev_len=" + std::to_string(prev_text.size()) +
-                " new_len=" + std::to_string(text.size()) + " -> RESET watermark");
+        // Detect segment change via offset timeline
+        if (offset != last_offset && last_offset != 0) {
+            LogHost("SPLITTER", "New segment detected via offset change: " + 
+                std::to_string(last_offset) + " -> " + std::to_string(offset) + " -> RESET watermark");
             Reset();
+        }
+        last_offset = offset;
+
+        // Coerce confirmed_len if text size is somehow shorter (defensive check)
+        if (text.size() < confirmed_len) {
+            confirmed_len = text.size();
         }
         prev_text = text;
 
@@ -1008,7 +1003,7 @@ int main(int argc, char* argv[]) {
                 FormatTimestamp(rawPkt.recvTick, g_lastTs, 20);
 
                 // Extract new sentences via Splitter
-                auto sentences = g_splitter.ExtractNewSentences(pkt.text, pkt.is_final);
+                auto sentences = g_splitter.ExtractNewSentences(pkt.text, pkt.is_final, pkt.offset);
                 if (!sentences.empty()) {
                     // Clear the current live line first to avoid character leftover
                     ClearLiveText();
