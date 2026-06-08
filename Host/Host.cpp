@@ -288,10 +288,11 @@ struct SentenceSplitter {
             if (!tail.empty()) {
                 LogHost("SPLITTER",
                     "FINAL tail_len=" + std::to_string(tail.size()) +
-                    " tail=\"" + TruncateForLog(tail) + "\" -> COMMIT & RESET");
+                    " tail=\"" + TruncateForLog(tail) + "\" -> COMMIT");
                 results.push_back(tail);
             }
-            Reset();
+            confirmed_len = text.size();
+            prev_text = text;
             return results;
         }
 
