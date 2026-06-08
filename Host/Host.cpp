@@ -38,17 +38,7 @@ static bool g_mockMode = false;
 // Log file path determined dynamically
 static std::string g_logPath = "";
 
-// Panel column config (characters).
-static constexpr int COL_LIVE_W     = 46;   // Live stream panel width
-static constexpr int COL_CONFIRM_W  = 46;   // Confirmed sentences panel width
-static constexpr int COL_STATS_W    = 26;   // Stats panel width
-static constexpr int CONSOLE_H      = 40;   // Desired console height (rows)
-
-static constexpr int COL_LIVE_X     = 0;
-static constexpr int COL_CONFIRM_X  = COL_LIVE_W + 1;
-static constexpr int COL_STATS_X    = COL_CONFIRM_X + COL_CONFIRM_W + 1;
-static constexpr int TOTAL_W        = COL_STATS_X + COL_STATS_W + 1;
-static constexpr SHORT CONTENT_TOP  = 2;
+// No layout constants required for standard logging B2B mode.
 
 // =============================================================
 // RAII WRAPPER FOR WINDOWS API HANDLES
@@ -170,93 +160,33 @@ static std::string TruncateForLog(const std::wstring& ws, size_t maxChars = 60) 
 }
 
 // =============================================================
-// SPLIT-VIEW STATE (guarded by g_csMutex)
+// LOGGING STATE (guarded by g_csMutex)
 // =============================================================
 static std::mutex g_csMutex;
-static SHORT      g_liveRow     = CONTENT_TOP;
-static SHORT      g_confirmRow  = CONTENT_TOP;
 static DWORD64    g_pktCount    = 0;
 static DWORD64    g_totalBytes  = 0;
 static DWORD64    g_lastDelayMs = 0;
 static wchar_t    g_lastTs[20]  = L"--:--:--";
 
-// =============================================================
-// CONSOLE HELPERS
-// =============================================================
-void MoveConsoleCursor(SHORT x, SHORT y) {
-    COORD pos = { x, y };
-    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
-}
+static size_t     g_lastLiveWidth = 0;
 
-void ClearPanelLine(SHORT x, SHORT y, int width) {
-    MoveConsoleCursor(x, y);
-    std::wstring blank(static_cast<size_t>(width), L' ');
-    DWORD written = 0;
-    WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), blank.c_str(),
-                  static_cast<DWORD>(blank.size()), &written, nullptr);
-}
-
-void WritePanelText(SHORT x, SHORT y, int panel_width, const std::wstring& text) {
-    ClearPanelLine(x, y, panel_width);
-    MoveConsoleCursor(x, y);
-    std::wstring clipped = text.substr(0, static_cast<size_t>(panel_width));
-    DWORD written = 0;
-    WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), clipped.c_str(),
-                  static_cast<DWORD>(clipped.size()), &written, nullptr);
-}
-
-void DrawFrame() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    MoveConsoleCursor(0, 0);
-
-    auto padCenter = [](const std::wstring& s, int w) -> std::wstring {
-        if (static_cast<int>(s.size()) >= w) return s.substr(0, w);
-        int pad = (w - static_cast<int>(s.size())) / 2;
-        return std::wstring(pad, L' ') + s + std::wstring(w - pad - static_cast<int>(s.size()), L' ');
-    };
-    std::wstring header =
-        padCenter(L"LIVE STREAM",           COL_LIVE_W)    + L"\u2502" +
-        padCenter(L"CONFIRMED SENTENCES",   COL_CONFIRM_W) + L"\u2502" +
-        padCenter(L"STATS",                 COL_STATS_W);
-
-    DWORD written = 0;
-    WriteConsoleW(hOut, header.c_str(), static_cast<DWORD>(header.size()), &written, nullptr);
-
-    MoveConsoleCursor(0, 1);
-    std::wstring sep;
-    sep.reserve(TOTAL_W);
-    for (int i = 0; i < TOTAL_W; ++i) {
-        int c = i - COL_LIVE_W;
-        if (c == 0 || c == COL_CONFIRM_W + 1)  sep += L'\u253C';
-        else                                   sep += L'\u2500';
+void PrintLiveText(const std::wstring& text) {
+    std::wstring line = L"\r[LIVE] [~] " + text;
+    if (line.size() < g_lastLiveWidth) {
+        line += std::wstring(g_lastLiveWidth - line.size(), L' ');
     }
-    WriteConsoleW(hOut, sep.c_str(), static_cast<DWORD>(sep.size()), &written, nullptr);
+    g_lastLiveWidth = line.size();
+    std::wcout << line;
+    std::wcout.flush();
 }
 
-void RedrawDividers(SHORT y) {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD written = 0;
-    MoveConsoleCursor(static_cast<SHORT>(COL_CONFIRM_X - 1), y);
-    WriteConsoleW(hOut, L"\u2502", 1, &written, nullptr);
-    MoveConsoleCursor(static_cast<SHORT>(COL_STATS_X - 1), y);
-    WriteConsoleW(hOut, L"\u2502", 1, &written, nullptr);
-}
-
-void UpdateStatsPanel() {
-    const SHORT x = static_cast<SHORT>(COL_STATS_X);
-
-    auto writeRow = [&](SHORT row, const std::wstring& label, const std::wstring& val) {
-        std::wstring line = label + val;
-        WritePanelText(x, row, COL_STATS_W, line);
-        RedrawDividers(row);
-    };
-
-    writeRow(CONTENT_TOP + 0, L"Pkts  : ", std::to_wstring(g_pktCount));
-    writeRow(CONTENT_TOP + 1, L"Bytes : ", std::to_wstring(g_totalBytes));
-    const DWORD64 avg = (g_pktCount > 0) ? (g_totalBytes / g_pktCount) : 0;
-    writeRow(CONTENT_TOP + 2, L"Avg   : ", std::to_wstring(avg) + L" B");
-    writeRow(CONTENT_TOP + 3, L"Delay : ", std::to_wstring(g_lastDelayMs) + L" ms");
-    writeRow(CONTENT_TOP + 4, L"Last  : ", std::wstring(g_lastTs));
+void ClearLiveText() {
+    if (g_lastLiveWidth > 0) {
+        std::wstring clearLine(g_lastLiveWidth, L' ');
+        std::wcout << L"\r" << clearLine << L"\r";
+        std::wcout.flush();
+        g_lastLiveWidth = 0;
+    }
 }
 
 static void FormatTimestamp(DWORD64 ts_ms, wchar_t* buf, size_t bufLen) {
@@ -856,22 +786,6 @@ int main(int argc, char* argv[]) {
     // 3. UI setup (skipped in --stdout or --inject-only mode)
     if (!g_stdoutOnly && !g_injectOnly) {
         _setmode(_fileno(stdout), _O_U16TEXT);
-
-        // Adjust Console Window Size
-        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-        SMALL_RECT windowSize = { 0, 0,
-                                  static_cast<SHORT>(TOTAL_W - 1),
-                                  static_cast<SHORT>(CONSOLE_H - 1) };
-        COORD bufferSize     = { static_cast<SHORT>(TOTAL_W),
-                                 static_cast<SHORT>(CONSOLE_H) };
-        SetConsoleScreenBufferSize(hOut, bufferSize);
-        SetConsoleWindowInfo(hOut, TRUE, &windowSize);
-
-        // Hide Cursor
-        CONSOLE_CURSOR_INFO ci = { 1, FALSE };
-        SetConsoleCursorInfo(hOut, &ci);
-
-        DrawFrame();
     }
 
     // 4. Start Named Pipe Server
@@ -887,8 +801,7 @@ int main(int argc, char* argv[]) {
     // 6. Discovery & Injection (skipped in Mock Mode)
     if (!g_mockMode) {
         if (!g_stdoutOnly && !g_injectOnly) {
-            MoveConsoleCursor(0, CONSOLE_H - 1);
-            std::wcout << L"[*] Waiting for LiveCaptions.exe...";
+            std::wcout << L"[*] Waiting for LiveCaptions.exe..." << std::endl;
         }
 
         wchar_t exePath[MAX_PATH] = {};
@@ -906,32 +819,24 @@ int main(int argc, char* argv[]) {
 
             if (pid != 0) {
                 if (!g_stdoutOnly && !g_injectOnly) {
-                    MoveConsoleCursor(0, CONSOLE_H - 1);
-                    ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                    std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting...";
+                    std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting..." << std::endl;
                 }
                 
                 if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
                     if (!g_stdoutOnly && !g_injectOnly) {
-                        MoveConsoleCursor(0, CONSOLE_H - 1);
-                        ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                        std::wcout << L"[+] Agent.dll already injected. Listening...";
+                        std::wcout << L"[+] Agent.dll already injected. Listening..." << std::endl;
                     }
                     break;
                 }
 
                 if (InjectDLL(pid, dllPath)) {
                     if (!g_stdoutOnly && !g_injectOnly) {
-                        MoveConsoleCursor(0, CONSOLE_H - 1);
-                        ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                        std::wcout << L"[+] Agent.dll injected successfully. Listening...";
+                        std::wcout << L"[+] Agent.dll injected successfully. Listening..." << std::endl;
                     }
                     break;
                 } else {
                     if (!g_stdoutOnly && !g_injectOnly) {
-                        MoveConsoleCursor(0, CONSOLE_H - 1);
-                        ClearPanelLine(0, CONSOLE_H - 1, TOTAL_W);
-                        std::wcout << L"[-] Injection failed. Retrying in 2s...";
+                        std::wcout << L"[-] Injection failed. Retrying in 2s..." << std::endl;
                     }
                     Sleep(2000);
                 }
@@ -956,8 +861,7 @@ int main(int argc, char* argv[]) {
         }
     } else {
         if (!g_stdoutOnly) {
-            MoveConsoleCursor(0, CONSOLE_H - 1);
-            std::wcout << L"[Mock Mode] Verification UI running...";
+            std::wcout << L"[Mock Mode] Verification UI running..." << std::endl;
         }
     }
 
@@ -1014,26 +918,44 @@ int main(int argc, char* argv[]) {
             g_lastDelayMs  = delayMs;
             FormatTimestamp(rawPkt.recvTick, g_lastTs, 20);
 
-            // Left panel: LIVE STREAM
-            const std::wstring livePrefix = pkt.is_final ? L"[F] " : L"[~] ";
-            WritePanelText(static_cast<SHORT>(COL_LIVE_X), g_liveRow, COL_LIVE_W, livePrefix + pkt.text);
-            RedrawDividers(g_liveRow);
-            g_liveRow++;
-            if (g_liveRow >= CONSOLE_H - 1) g_liveRow = CONTENT_TOP;
-
-            // Center panel: CONFIRMED SENTENCES (Sentence Splitter)
+            // Extract new sentences via Splitter
             auto sentences = g_splitter.ExtractNewSentences(pkt.text, pkt.is_final);
-            for (const std::wstring& s : sentences) {
-                ++g_splitter.sentence_idx;
-                std::wstring label = std::to_wstring(g_splitter.sentence_idx) + L". ";
-                WritePanelText(static_cast<SHORT>(COL_CONFIRM_X), g_confirmRow, COL_CONFIRM_W, label + s);
-                RedrawDividers(g_confirmRow);
-                g_confirmRow++;
-                if (g_confirmRow >= CONSOLE_H - 1) g_confirmRow = CONTENT_TOP;
+            if (!sentences.empty()) {
+                // Clear the current live line first to avoid character leftover
+                ClearLiveText();
+
+                for (const std::wstring& s : sentences) {
+                    ++g_splitter.sentence_idx;
+                    std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s << std::endl;
+                }
+
+                // Output stats immediately after COMMIT
+                const DWORD64 avg = (g_pktCount > 0) ? (g_totalBytes / g_pktCount) : 0;
+                std::wcout << L"[STATS] Pkts: " << g_pktCount
+                           << L" | Bytes: " << g_totalBytes
+                           << L" | Avg: " << avg << L" B"
+                           << L" | Delay: " << g_lastDelayMs << L" ms"
+                           << L" | Last: " << g_lastTs
+                           << std::endl;
             }
 
-            // Right panel: STATS
-            UpdateStatsPanel();
+            // Display remaining live text
+            if (!pkt.is_final) {
+                std::wstring liveText = pkt.text;
+                if (g_splitter.confirmed_len < liveText.size()) {
+                    liveText = liveText.substr(g_splitter.confirmed_len);
+                    size_t start = liveText.find_first_not_of(L' ');
+                    if (start != std::wstring::npos) {
+                        liveText = liveText.substr(start);
+                    }
+                } else {
+                    liveText.clear();
+                }
+                PrintLiveText(liveText);
+            } else {
+                // If it is final, make sure to clean up the live line
+                ClearLiveText();
+            }
         }
     }
 
