@@ -19,11 +19,11 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "MSLC Project"
-            VALUE "FileDescription", "Live Caption Extractor Core Hook DLL"
+            VALUE "FileDescription", "Live Caption Extractor Agent Hook DLL"
             VALUE "FileVersion", "1.0.0.1"
-            VALUE "InternalName", "HookCore.dll"
+            VALUE "InternalName", "Agent.dll"
             VALUE "LegalCopyright", "Copyright (C) 2026 MSLC Project"
-            VALUE "OriginalFilename", "HookCore.dll"
+            VALUE "OriginalFilename", "Agent.dll"
             VALUE "ProductName", "Live Caption Extractor"
             VALUE "ProductVersion", "1.0.0.1"
         END
