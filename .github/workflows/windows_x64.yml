@@ -1,4 +1,4 @@
-name: Build x64 Release (Windows + Attest)
+name: Build x64 Release
 
 on:
   push:
@@ -10,6 +10,7 @@ permissions:
   contents: write
   id-token: write
   packages: write
+  attestations: write
 
 jobs:
   build:
@@ -20,12 +21,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Restore NuGet packages
-        shell: pwsh
         run: nuget restore Native.sln
 
       - name: Build solution (x64 Release)
-        shell: pwsh
         run: msbuild Native.sln /m /p:Configuration=Release /p:Platform=x64
 
       - name: Create SHA256SUMS.txt
@@ -48,10 +50,14 @@ jobs:
         shell: pwsh
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
-          $zip = Join-Path $out 'release-artifacts.zip'
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -Force
-          Write-Host "Created $zip"
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "manual" }
+          $zipName = "mslc-extractor-$tag-win-x64.zip"
+          $zipPath = Join-Path $out $zipName
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "$out\Loader.exe", "$out\HookCore.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+          echo "ZIP_PATH=$zipPath" >> $env:GITHUB_ENV
+          Write-Host "Created artifact: $zipName"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1
@@ -60,22 +66,32 @@ jobs:
             x64/Release/Host.exe
             x64/Release/Agent.dll
             x64/Release/SHA256SUMS.txt
+            ${{ env.ZIP_PATH }}
 
       - name: Upload build artifact (Actions UI)
         uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts
-          path: x64/Release/release-artifacts.zip
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_PATH }}
 
       - name: Create GitHub release (from tag) and attach zip
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           body: |
-            Built by workflow run:
-            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          artifacts: x64/Release/release-artifacts.zip
+            ### Binaries Details
+            - **Platform**: Windows x64
+            - **Version**: ${{ github.ref_name }}
+            - **Build Run**: [View Process](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            **Security Verification:**
+            - Verify SHA256 checksums in the `SHA256SUMS.txt` inside the zip.
+            - This build is verified with **GitHub Artifact Attestations** (check the link above).
+            
+            > **Note**: Anti-virus software may flag these files due to the memory hooking techniques used to extract text.
+          artifacts: ${{ env.ZIP_PATH }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           prerelease: false
