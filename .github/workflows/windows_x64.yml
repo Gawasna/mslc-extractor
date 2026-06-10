@@ -41,7 +41,7 @@ jobs:
             Sort-Object Name |
             ForEach-Object {
               $h = Get-FileHash $_.FullName -Algorithm SHA256
-              "{0}  {1}" -f $h.Hash, $_.Name
+              "{0}  {1}" -f $h.Hash.ToLower(), $_.Name
             } | Out-File -FilePath $sumfile -Encoding ASCII
           Write-Host "Checksums written to $sumfile"
           Get-Content $sumfile
@@ -54,7 +54,7 @@ jobs:
           $zipName = "mslc-extractor-$tag-win-x64.zip"
           $zipPath = Join-Path $out $zipName
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          Compress-Archive -Path "$out\Loader.exe", "$out\HookCore.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
+          Compress-Archive -Path "$out\Host.exe", "$out\Agent.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
           echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
           echo "ZIP_PATH=$zipPath" >> $env:GITHUB_ENV
           Write-Host "Created artifact: $zipName"
@@ -63,8 +63,8 @@ jobs:
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: |
-            x64/Release/Loader.exe
-            x64/Release/HookCore.dll
+            x64/Release/Host.exe
+            x64/Release/Agent.dll
             x64/Release/SHA256SUMS.txt
             ${{ env.ZIP_PATH }}
 

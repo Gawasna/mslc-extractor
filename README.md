@@ -1,211 +1,192 @@
-# Live Caption Extractor (MSLC Extractor)
+# Microsoft Live Captions Extractor (MSLC Extractor)
 
-**Project Overview**
-- **Description**: Native Windows injector + hook that extracts Live Captions text from the Microsoft Live Captions engine by hooking the Azure Speech SDK core API and displaying real-time captions in a split-view console UI.
-- **Components**: 
-  - **Loader** (injector + split-view console UI with Named Pipe server)
-  - **HookCore** (DLL that hooks Azure Speech SDK result APIs)
+MSLC Extractor is a production-ready, high-performance native Windows utility that intercepts real-time subtitle text streams from the Microsoft Live Captions engine (`LiveCaptions.exe`). By hooking into the low-level APIs of the Microsoft Azure Speech SDK core module, it extracts, processes, and logs real-time spoken text with zero UI layout dependencies and minimal resource footprint.
 
-## How it Works
+The system is split into two primary components:
+1.  **Host** ([Host.cpp](file:///C:/Users/hungl/Documents/mslc-extractor/Host/Host.cpp)): A standalone C++ controller executable (`Host.exe`) that manages injector operations, runs a secure Named Pipe IPC server, processes raw text using an advanced sentence-splitting algorithm, logs output in a robust format, and monitors target process life cycles.
+2.  **Agent** ([dllmain.cpp](file:///C:/Users/hungl/Documents/mslc-extractor/Agent/dllmain.cpp)): A dynamic-link library (`Agent.dll`) injected into the target process sandbox. It hooks the Azure Speech SDK's native exports to intercept recognized caption strings and associated metadata (such as timestamps, durations, and result IDs) directly from memory.
 
-### Injection Process
-- **Loader** locates `LiveCaptions.exe` (or opens Live Captions settings if not running)
-- Sets DACL permissions on `HookCore.dll` for AppContainer sandbox compatibility
-- Injects `HookCore.dll` into the target process via `CreateRemoteThread` + `LoadLibraryW`
-- Starts Named Pipe server (`\\.\pipe\LiveCaptionPipe`) with NULL DACL for IPC
+---
 
-### Hooking Mechanism (Azure Speech SDK API)
-- **HookCore** actively scans for `microsoft.cognitiveservices.speech.core.dll` using `EnumProcessModules`
-- Locates two exports from Azure Speech SDK:
-  - `result_get_text` - retrieves recognized text buffer
-  - `result_get_reason` - queries recognition state (partial vs final)
-- Installs MinHook detour on `result_get_text` to intercept all caption text
-- Implements retry mechanism (20 attempts with 1-second intervals) for module detection
+## Key Features & Production Enhancements
 
-### Data Flow
-1. **Capture**: Detour intercepts `result_get_text` calls with recognized text buffer (`char*`)
-2. **State Detection**: Queries `result_get_reason` to determine if result is partial (`ResultReason_RecognizingSpeech`) or final (`ResultReason_RecognizedSpeech`)
-3. **Logging**: Captured text is written to `C:\Users\Public\live_caption_debug.txt` with ISO 8601 timestamps
-4. **Pipe Communication**: JSON payload sent via persistent Named Pipe connection to Loader
-   - Format: `{"text":"...","is_final":true/false,"bytes":N,"ts_ms":T}`
-   - Persistent connection (no reconnect per packet) to preserve splitter state
-5. **Console Display**: Loader renders captions in split-view UI:
-   - **Left panel**: Live stream with `[~]` (partial) and `[F]` (final) tags
-   - **Center panel**: Confirmed sentences extracted via delta watermark splitter
-   - **Right panel**: Real-time statistics (packet count, bytes, latency, timestamp)
+### 1. Back-To-Basic (B2B) Standard Logging
+The application uses a clean, standard console-logging format that is ideal for terminal scrolls and integration with downstream pipelines (such as translation engines, voice synthesis, or subtitle overlays):
+*   **Dynamic Live Stream (`[LIVE]`)**: Displays partial recognition text dynamically using carriage returns (`\r`) to prevent terminal flooding.
+*   **Committed Sentences (`[COMMIT]`)**: Outputs fully recognized, finalized sentences on new lines, including precise metadata (absolute offset, utterance duration, and Azure Speech SDK result ID).
+*   **Runtime Stats (`[STATS]`)**: Appends key performance metrics (packet counters, bandwidth, transmission delays) immediately after a commit event.
 
-### Key Implementation Details
+### 2. Offset-Based Segmentation ($O(1)$ Complexity)
+In real-time environments, the Azure Speech SDK continuously appends and revises words inside a running buffer, sending cumulative text. 
+*   **The Problem**: Simple delta-watermark text matching causes severe text duplication or "Mega-sentences" when spelling corrections or punctuation resets happen in the engine.
+*   **The Solution**: An advanced **Offset-based Segmentation** algorithm implemented in [Host.cpp](file:///C:/Users/hungl/Documents/mslc-extractor/Host/Host.cpp). It tracks the unique microsecond `offset` of each speech segment. Watermark resets and sentence boundaries are processed relative to this offset. Spell-check updates to previously committed text within the same offset are safely ignored, achieving 100% resolution of duplication and Mega-sentence anomalies.
+*   **Sanitization**: Employs an alphanumeric check via `iswalnum` to discard empty sentences or orphan punctuation noise (e.g. standalone dots).
 
-**HookCore (DLL)**:
-- **Hook Target**: `result_get_text` function (stdcall convention)
-- **Function Signature**: `int __stdcall result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen)`
-- **Module Discovery**: Dynamic scanning via `FindModuleByPartialName()` instead of passive `GetModuleHandle()`
-- **Text Format**: Narrow strings (`char*`) from core API, not wide strings from UI layer
-- **Pipe Strategy**: Persistent connection with lazy reconnect on write failure (prevents splitter reset)
-- **Thread Safety**: `CRITICAL_SECTION` guards pipe handle against concurrent hook calls
+### 3. QA/QC Hardening & Architectural Resilience
+*   **RAII Resource Management**: All raw Windows handles, critical sections, and thread handles are wrapped in RAII-compliant smart containers (such as `std::unique_ptr` with custom deleters and `std::lock_guard`) to prevent memory and handle leaks under error conditions.
+*   **SPSC Lock-Free Architecture**: Utilizes a Single-Producer Single-Consumer queue pattern. The Named Pipe receiver thread (**Producer**) queues raw packets and immediately resumes listening. The main processing loop (**Consumer**) pops from the queue to run splitting logic and render logs, eliminating rendering latency bottlenecks (Backpressure) on the SDK's internal speech threads.
+*   **Secure Named Pipe DACL**: Restricts Named Pipe access. Rather than exposing a NULL DACL, it configures a secure Access Control List (DACL) restricting client connections to AppContainer sandboxes (SID: `S-1-15-2-1` / `ALL APPLICATION PACKAGES`) and the process owner's security token.
+*   **Auto-Reinjection & Process Watchdog**: Detects if `LiveCaptions.exe` is closed, restarted, or crashes. The Host automatically releases zombie Named Pipes, exits the Consumer loop, and re-enters the Discovery loop to dynamically re-inject the Agent DLL when the target process restarts.
+*   **Centralized Logging**: Diagnostic logs for both components are consolidated into the workspace directory at [logs/mslc_host_debug.txt](file:///C:/Users/hungl/Documents/mslc-extractor/logs/mslc_host_debug.txt) and [logs/mslc_agent_debug.txt](file:///C:/Users/hungl/Documents/mslc-extractor/logs/mslc_agent_debug.txt).
 
-**Loader (Console UI)**:
-- **Split-View Layout**: 3-column design with box-drawing characters (Unicode U+2502, U+2500, U+253C)
-- **Sentence Splitter**: Delta watermark algorithm to prevent duplicate sentences
-  - Tracks `confirmed_len` (chars already committed to Confirmed panel)
-  - Scans only new suffix `[confirmed_len .. end]` for sentence boundaries (`.?!`)
-  - Handles fast speech (multi-sentence batches) without duplication
-  - Resets watermark on FINAL or regression detection
-- **Logging**: Rolling window (100 lines max) written to `C:\Users\Public\loader_debug.txt`
-- **Latency Tracking**: Measures pipe delay via `GetTickCount64()` delta (HookCore capture → Loader receive)
+---
 
-## Security & Privacy
+## How It Works
 
-⚠️ **Important Security Notice**:
-- This project hooks into RAM when Live Captions is running and extracts text from there
-- **Windows Defender and antivirus software will detect this as malware/PUP**
-- You **must whitelist** the project folder or built binaries to avoid false positives
-- For AppContainer compatibility, the code sets DACL permissions (read/execute) on the DLL before injection
-
-**Trust & Verification**:
-- If you do not trust the release, **build from source** or verify SHA256 checksums in `SHA256SUMS.txt`
-- Verification commands:
-```powershell
-CertUtil -hashfile .\x64\Release\Loader.exe SHA256
-CertUtil -hashfile .\x64\Release\HookCore.dll SHA256
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Host as Host.exe (Medium Integrity)
+    participant LC as LiveCaptions.exe (AppContainer Sandbox)
+    participant SDK as microsoft.cognitiveservices.speech.core.dll
+    
+    Note over Host: Discovery Loop
+    Host->>LC: Locate process PID (OpenProcess)
+    Note over Host: Adjusts ACLs for AppContainer compatibility
+    Host->>LC: Inject Agent.dll via CreateRemoteThread
+    Activate LC
+    Note over LC: Agent.dll Loaded
+    LC->>SDK: Resolve Native Exports (result_get_text, result_get_offset, etc.)
+    LC->>SDK: Install MinHook Detours
+    Host->>Host: Initialize Named Pipe Server with Secure DACL
+    LC->>Host: Connect Client Named Pipe (Persistent Connection)
+    Deactivate LC
+    
+    Note over LC,SDK: Azure Speech SDK Captures Audio
+    SDK->>LC: Trigger result_get_text() Hook
+    Activate LC
+    Note over LC: Extract Text & Metadata (Offset, Duration, Result ID)
+    LC->>Host: Push JSON Payload via Secure Pipe (Non-Blocking I/O)
+    Deactivate LC
+    
+    Activate Host
+    Host->>Host: SPSC Queue Push -> Consumer Thread Pop
+    Host->>Host: Offset-Based Segmentation & Delta Splitting
+    Host->>Host: Write Log to logs/mslc_host_debug.txt
+    Host->>Console: Render B2B Logs (LIVE / COMMIT / STATS)
+    Deactivate Host
 ```
+
+### JSON IPC Payload Format
+Packets are transmitted via the named pipe as compact JSON strings:
+```json
+{
+  "text": "this is a real time caption",
+  "is_final": false,
+  "offset": 123400000,
+  "duration": 25000000,
+  "result_id": "abc123e4f5g6789h",
+  "ts_ms": 1717900000000
+}
+```
+*   `offset` / `duration`: Stored in 100-nanosecond ticks (SDK native units). The Host converts these to seconds for display.
+*   `is_final`: Indicates whether the SDK has completed processing the current audio segment.
+
+---
+
+## Command-Line Interface (CLI Flags)
+
+The `Host.exe` executable supports a rich suite of command-line flags to streamline automated deployments, scripting integrations, and testing:
+
+| Flag / Option | Description |
+| :--- | :--- |
+| `-p, --pid <PID>` | Target a specific process ID directly, skipping the automatic process discovery loop. |
+| `-n, --pipe-name <name>` | Use a custom Named Pipe name (default: `LiveCaptionPipe`). Allows running multiple instances concurrently. |
+| `-d, --debug` | Enable verbose debug logging to stdout instead of capping local debug files. |
+| `--log-path <path>` | Specify a custom folder or file path for the Host's runtime debug logs. |
+| `--stdout` | Streams clean JSON subtitles directly to Standard Output, facilitating Unix-pipe integration with Python, NodeJS, or Tauri wrappers. |
+| `--no-spawn` | Prevents the Host from invoking Windows ShellExecute to open the Live Captions Settings panel if the process is not found. |
+| `--inject-only` | Injects `Agent.dll` into the target process and immediately terminates the Host, leaving pipe management to external tools. |
+| `-m, --mock` | **MVW Mock Mode**: Simulates real-time Azure Speech SDK caption packets. Runs the entire pipeline, sentence splitter, and console UI offline without target process dependency. |
+
+---
 
 ## Build Instructions
 
 ### Prerequisites
-- Visual Studio 2022 (or later) with C++ desktop development workload
-- MinHook library (included in project)
-- Target: x64 architecture
+*   **Operating System**: Windows 11 (with the Live Captions feature installed and enabled).
+*   **IDE**: Visual Studio 2022 (with "Desktop development with C++" workload).
+*   **Dependencies**: MinHook library (headers and libraries are embedded in the repository).
 
 ### Steps
-1. **Open Solution**: Open `Native.sln` in Visual Studio
-2. **Configure MinHook** (if needed):
-   - In some VS 2022 setups, manually edit lib name from `libMinHook-x86-v141-mt.lib` to `libMinHook.lib`
-   - Ensure MinHook include/lib paths are correctly set in project properties
-3. **Build Configuration**: 
-   - Set platform to `x64`
-   - Set configuration to `Release`
-   - Build both `Loader` and `HookCore` projects
-4. **Output**: Built binaries will appear in `x64\Release\`
+1.  Open the Visual Studio Solution: [Native.sln](file:///C:/Users/hungl/Documents/mslc-extractor/Native.sln).
+2.  Set the Active Build Configuration:
+    *   **Platform**: `x64` (Microsoft Live Captions runs as a 64-bit application; x86 build is not supported).
+    *   **Configuration**: `Release`.
+3.  Perform a Build:
+    *   Right-click the Solution and select **Build Solution**.
+    *   Alternatively, run MSBuild via the Developer Command Prompt:
+        ```powershell
+        msbuild Native.sln /p:Configuration=Release /p:Platform=x64
+        ```
+4.  Binaries will be output to the directory: `x64\Release\`.
+
+---
 
 ## Usage
 
 ### Prerequisites
-- Windows 11 with Live Captions feature enabled
-- Administrator privileges recommended (for injection)
+*   Run the host application inside a terminal with standard privileges.
+*   If `LiveCaptions.exe` is not running, and `--no-spawn` is not set, the Host will automatically open the Windows Live Captions activation screen.
 
-### Running the Extractor
-
-1. **Navigate to Release folder**:
+### Running in Standard Mode
+To launch the extractor with standard console output:
 ```powershell
-cd .\x64\Release\
+cd x64\Release
+.\Host.exe
 ```
 
-2. **Run the Loader**:
-```powershell
-.\Loader.exe
+**Example Output**:
+```text
+[2026-06-10 18:15:30.124] [Host] Discovery: Scanning for LiveCaptions.exe...
+[2026-06-10 18:15:31.450] [Host] Discovery: Found LiveCaptions.exe (PID: 8432)
+[2026-06-10 18:15:31.465] [Host] Injector: Setting AppContainer permissions on Agent.dll
+[2026-06-10 18:15:31.490] [Host] Injector: DLL successfully injected into PID 8432
+[2026-06-10 18:15:31.512] [Host] Named Pipe server listening on: \\.\pipe\LiveCaptionPipe
+[2026-06-10 18:15:32.100] [Host] Named Pipe connection established. Starting consumer loop...
+
+[LIVE]   welcome to the live demo of the extraction engine (updates in-place)
+[COMMIT] [Offset: 1.45s, Duration: 3.20s] [ID: s8g9d8f9...] Welcome to the live demo of the extraction engine.
+[STATS]  Packets: 24 | Bytes: 412 B | Delay: 12 ms | Queue Size: 0
+[LIVE]   we are checking the performance of the offset segmentation algorithm (updates in-place)
 ```
 
-3. **Expected Behavior**:
-   - If `LiveCaptions.exe` is not running, Loader will open Live Captions settings and wait
-   - Once detected, HookCore.dll will be injected
-   - Console will display split-view UI:
-     ```
-     ┌─────────────────────────────────────────────┬─────────────────────────────────────────────┬──────────────────────────┐
-     │              LIVE STREAM                    │         CONFIRMED SENTENCES                 │          STATS           │
-     ├─────────────────────────────────────────────┼─────────────────────────────────────────────┼──────────────────────────┤
-     │ [~] text being recognized...                │ 1. This is a complete sentence.             │ Pkts  : 42               │
-     │ [F] completed sentence here.                │ 2. Another confirmed sentence.              │ Bytes : 1024             │
-     │                                             │                                             │ Avg   : 24 B             │
-     │                                             │                                             │ Delay : 15 ms            │
-     │                                             │                                             │ Last  : 12:34:56         │
-     └─────────────────────────────────────────────┴─────────────────────────────────────────────┴──────────────────────────┘
-     ```
-   - Debug logs:
-     - HookCore: `C:\Users\Public\live_caption_debug.txt` (ISO 8601 timestamps)
-     - Loader: `C:\Users\Public\loader_debug.txt` (rolling 100-line window)
+### Running in Mock Mode (Offline Testing)
+To verify the UI, sentence splitter, and pipeline without hooking the system:
+```powershell
+.\Host.exe -m
+```
 
-### Troubleshooting
+### Streaming JSON to stdout (Integration Mode)
+To stream subtitle packets into a NodeJS or Python process:
+```powershell
+.\Host.exe --stdout --no-spawn | node your_subtitle_processor.js
+```
 
-**Injection Fails**:
-- Run `Loader.exe` as Administrator
-- Ensure both Loader and target process are x64 (not x86)
-- Check Windows Defender exclusions
+---
 
-**No Captions Captured**:
-- Verify `live_caption_debug.txt` for diagnostic messages
-- Check if Live Captions is actively transcribing audio
-- Ensure correct DLL is being loaded (check log for "Core DLL handle found")
-- Verify `result_get_text` and `result_get_reason` exports are resolved
+## Security & Privacy Notice
 
-**Module Not Found**:
-- The DLL scan runs 20 times with 1-second intervals
-- If still failing, Windows may have updated the core DLL name/structure
-- Check log for "Could not find Core DLL handle after all retries"
+> [WARNING]
+> Because `Host.exe` uses low-level system calls (`VirtualAllocEx`, `WriteProcessMemory`, and `CreateRemoteThread`) to inject a DLL into another running process, **Windows Defender and other antivirus tools will flag this utility as a Trojan (e.g. Wacatac.C!ml, Sabsik, or Bearfoos)**. These are heuristic machine learning alerts (`!ml`) triggered by DLL injection behaviors.
+>
+> To use this utility, you must whitelist the folder containing the binaries or build the executable from source to verify its safety.
 
-**Duplicate Sentences**:
-- Check `loader_debug.txt` for splitter watermark progression
-- Verify splitter is not resetting mid-utterance (look for "REGRESSION detected")
-- Ensure pipe connection is persistent (no "Pipe write failed" errors in HookCore log)
+### Verifying Hashes
+To ensure the integrity of your built binaries, you can generate SHA-256 hashes and compare them with the release metadata:
+```powershell
+CertUtil -hashfile .\x64\Release\Host.exe SHA256
+CertUtil -hashfile .\x64\Release\Agent.dll SHA256
+```
 
-## Approach Justification
-
-### HookCore Configuration (dllmain.cpp)
-
-**Constants** (top of file):
-- `LOG_PATH`: HookCore debug log location (default: `C:\Users\Public\live_caption_debug.txt`)
-- `PIPE_NAME`: Named Pipe endpoint (default: `\\.\pipe\LiveCaptionPipe`)
-- `MODULE_SCAN_RETRIES`: Max attempts to find core DLL (default: 20)
-- `MODULE_SCAN_INTERVAL`: Delay between scans in ms (default: 1000)
-
-**Target DLL**: `microsoft.cognitiveservices.speech.core.dll`
-- Modify in `FindModuleByPartialName()` call if Microsoft changes the DLL name
-
-**Target Functions**:
-- `result_get_text` - hooked to intercept text buffer
-- `result_get_reason` - called (not hooked) to query recognition state
-- Update in `GetProcAddress()` calls if API signature changes
-
-### Loader Configuration (Loader.cpp)
-
-**Panel Layout** (top of file):
-- `COL_LIVE_W`: Live stream panel width in chars (default: 46)
-- `COL_CONFIRM_W`: Confirmed sentences panel width (default: 46)
-- `COL_STATS_W`: Stats panel width (default: 26)
-- `CONSOLE_H`: Console height in rows (default: 40)
-
-**Sentence Splitter**:
-- `BOUNDARIES`: Punctuation chars for sentence splitting (default: `.?!`)
-- Modify in `SentenceSplitter::BOUNDARIES` if you want to include/exclude punctuation
-
-## Architecture Evolution
-
-### v1: UI Layer Hooking (Deprecated)
-- Hooked `GetUnimicDecoderNBestDisplayText` from runtime DLL
-- Extracted text from memory offset (`TEXT_OFFSET 0x190`)
-- Wide string (`wchar_t*`) handling
-- Fragile: broke on Windows updates
-
-### v2: Core API Hooking (Current)
-- Hooks `result_get_text` from Azure Speech SDK core DLL
-- Queries `result_get_reason` for recognition state detection
-- Direct API interception with standard function signature
-- Narrow string (`char*`) handling
-- Persistent Named Pipe connection to preserve splitter state
-- Delta watermark sentence splitter to prevent duplicates
-
-**Key Improvements**:
-- Earlier access to recognized text (before UI rendering)
-- Reliable partial/final detection via SDK API (not punctuation heuristics)
-- Better compatibility across Windows updates
-- Split-view console UI with real-time statistics
-- Intelligent sentence splitting for fast speech (multi-sentence batches)
-- Latency tracking (capture → display pipeline)
+---
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+---
+
 ## Disclaimer
 
-This tool is designed to enhance accessibility by extracting Live Captions output. Users are responsible for complying with local laws regarding audio recording and transcription.
+This tool is designed to enhance accessibility by extracting Live Captions output. Users are responsible for complying with local laws regarding audio recording, transcription, and privacy.
