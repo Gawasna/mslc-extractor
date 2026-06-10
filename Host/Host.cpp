@@ -394,6 +394,11 @@ void PipeListener() {
     SECURITY_ATTRIBUTES sa = { sizeof(sa), pSD, FALSE };
 
     while (!g_exitHost) {
+        if (g_needReinjection) {
+            Sleep(500);
+            continue;
+        }
+
         HANDLE hPipe = CreateNamedPipeW(
             g_customPipeName.c_str(),
             PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
@@ -417,7 +422,7 @@ void PipeListener() {
         if (!connected) {
             DWORD err = GetLastError();
             if (err == ERROR_IO_PENDING) {
-                while (!g_exitHost) {
+                while (!g_exitHost && !g_needReinjection) {
                     DWORD waitRes = WaitForSingleObject(hConnectEvent.Get(), 500);
                     if (waitRes == WAIT_OBJECT_0) {
                         connected = TRUE;
@@ -429,7 +434,7 @@ void PipeListener() {
             }
         }
 
-        if (!connected || g_exitHost) {
+        if (!connected || g_exitHost || g_needReinjection) {
             continue;
         }
 
@@ -900,11 +905,23 @@ int main(int argc, char* argv[]) {
                     } else {
                         injectRetries++;
                         if (injectRetries >= 3) {
-                            if (!g_stdoutOnly && !g_injectOnly) {
-                                std::wcout << L"[-] Injection failed 3 times. Return feedback only and aborting." << std::endl;
+                            if (g_injectOnly) {
+                                if (!g_stdoutOnly) {
+                                    std::wcout << L"[-] Injection failed 3 times in inject-only mode. Aborting." << std::endl;
+                                }
+                                LogHost("INJECT", "Injection failed 3 times in inject-only mode. Aborting.");
+                                return 1; // Abort process on failure
+                            } else {
+                                if (!g_stdoutOnly) {
+                                    std::wcout << L"[-] Injection failed 3 times. Resetting target and retrying discovery..." << std::endl;
+                                }
+                                LogHost("INJECT", "Injection failed 3 times. Resetting target PID to retry discovery.");
+                                pid = 0;
+                                g_targetPid = 0;
+                                injectRetries = 0;
+                                Sleep(2000);
+                                continue;
                             }
-                            LogHost("INJECT", "Injection failed 3 times. Aborting.");
-                            return 1; // Abort process on failure
                         }
                         if (!g_stdoutOnly && !g_injectOnly) {
                             std::wcout << L"[-] Injection failed. Retrying in 2s..." << std::endl;
@@ -957,6 +974,29 @@ int main(int argc, char* argv[]) {
                 }
 
                 if (g_packetQueue.empty()) {
+                    // Check if the target process crashed or terminated while waiting for packets
+                    if (!g_mockMode && g_targetPid != 0) {
+                        SafeHandle shProcess(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, g_targetPid));
+                        bool isProcessDead = true;
+                        if (shProcess.IsValid()) {
+                            DWORD exitCode = 0;
+                            if (GetExitCodeProcess(shProcess.Get(), &exitCode)) {
+                                if (exitCode == STILL_ACTIVE) {
+                                    isProcessDead = false;
+                                }
+                            }
+                        }
+
+                        if (isProcessDead) {
+                            LogHost("PIPE", "LiveCaptions.exe (PID: " + std::to_string(g_targetPid) + ") terminated while waiting for packets. Re-discovery initiated.");
+                            if (!g_stdoutOnly) {
+                                ClearLiveText();
+                                std::wcout << L"[-] LiveCaptions.exe (PID: " << g_targetPid << L") terminated. Re-discovery initiated..." << std::endl;
+                            }
+                            g_needReinjection = true;
+                            break;
+                        }
+                    }
                     continue;
                 }
 
