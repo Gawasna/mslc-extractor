@@ -1,33 +1,10 @@
 # Microsoft Live Captions Extractor (MSLC Extractor)
 
-MSLC Extractor is a production-ready, high-performance native Windows utility that intercepts real-time subtitle text streams from the Microsoft Live Captions engine (`LiveCaptions.exe`). By hooking into the low-level APIs of the Microsoft Azure Speech SDK core module, it extracts, processes, and logs real-time spoken text with zero UI layout dependencies and minimal resource footprint.
+MSLC Extractor is a native Windows utility designed to intercept real-time subtitle text streams from the Microsoft Live Captions engine (`LiveCaptions.exe`). By hooking into the low-level APIs of the Microsoft Azure Speech SDK core module, it extracts, processes, and logs real-time spoken text with zero UI layout dependencies and minimal resource footprint.
 
 The system is split into two primary components:
 1.  **Host** ([Host.cpp](file:///C:/Users/hungl/Documents/mslc-extractor/Host/Host.cpp)): A standalone C++ controller executable (`Host.exe`) that manages injector operations, runs a secure Named Pipe IPC server, processes raw text using an advanced sentence-splitting algorithm, logs output in a robust format, and monitors target process life cycles.
 2.  **Agent** ([dllmain.cpp](file:///C:/Users/hungl/Documents/mslc-extractor/Agent/dllmain.cpp)): A dynamic-link library (`Agent.dll`) injected into the target process sandbox. It hooks the Azure Speech SDK's native exports to intercept recognized caption strings and associated metadata (such as timestamps, durations, and result IDs) directly from memory.
-
----
-
-## Key Features & Production Enhancements
-
-### 1. Back-To-Basic (B2B) Standard Logging
-The application uses a clean, standard console-logging format that is ideal for terminal scrolls and integration with downstream pipelines (such as translation engines, voice synthesis, or subtitle overlays):
-*   **Dynamic Live Stream (`[LIVE]`)**: Displays partial recognition text dynamically using carriage returns (`\r`) to prevent terminal flooding.
-*   **Committed Sentences (`[COMMIT]`)**: Outputs fully recognized, finalized sentences on new lines, including precise metadata (absolute offset, utterance duration, and Azure Speech SDK result ID).
-*   **Runtime Stats (`[STATS]`)**: Appends key performance metrics (packet counters, bandwidth, transmission delays) immediately after a commit event.
-
-### 2. Offset-Based Segmentation ($O(1)$ Complexity)
-In real-time environments, the Azure Speech SDK continuously appends and revises words inside a running buffer, sending cumulative text. 
-*   **The Problem**: Simple delta-watermark text matching causes severe text duplication or "Mega-sentences" when spelling corrections or punctuation resets happen in the engine.
-*   **The Solution**: An advanced **Offset-based Segmentation** algorithm implemented in [Host.cpp](file:///C:/Users/hungl/Documents/mslc-extractor/Host/Host.cpp). It tracks the unique microsecond `offset` of each speech segment. Watermark resets and sentence boundaries are processed relative to this offset. Spell-check updates to previously committed text within the same offset are safely ignored, achieving 100% resolution of duplication and Mega-sentence anomalies.
-*   **Sanitization**: Employs an alphanumeric check via `iswalnum` to discard empty sentences or orphan punctuation noise (e.g. standalone dots).
-
-### 3. QA/QC Hardening & Architectural Resilience
-*   **RAII Resource Management**: All raw Windows handles, critical sections, and thread handles are wrapped in RAII-compliant smart containers (such as `std::unique_ptr` with custom deleters and `std::lock_guard`) to prevent memory and handle leaks under error conditions.
-*   **SPSC Lock-Free Architecture**: Utilizes a Single-Producer Single-Consumer queue pattern. The Named Pipe receiver thread (**Producer**) queues raw packets and immediately resumes listening. The main processing loop (**Consumer**) pops from the queue to run splitting logic and render logs, eliminating rendering latency bottlenecks (Backpressure) on the SDK's internal speech threads.
-*   **Secure Named Pipe DACL**: Restricts Named Pipe access. Rather than exposing a NULL DACL, it configures a secure Access Control List (DACL) restricting client connections to AppContainer sandboxes (SID: `S-1-15-2-1` / `ALL APPLICATION PACKAGES`) and the process owner's security token.
-*   **Auto-Reinjection & Process Watchdog**: Detects if `LiveCaptions.exe` is closed, restarted, or crashes. The Host automatically releases zombie Named Pipes, exits the Consumer loop, and re-enters the Discovery loop to dynamically re-inject the Agent DLL when the target process restarts.
-*   **Centralized Logging**: Diagnostic logs for both components are consolidated into the workspace directory at [logs/mslc_host_debug.txt](file:///C:/Users/hungl/Documents/mslc-extractor/logs/mslc_host_debug.txt) and [logs/mslc_agent_debug.txt](file:///C:/Users/hungl/Documents/mslc-extractor/logs/mslc_agent_debug.txt).
 
 ---
 
