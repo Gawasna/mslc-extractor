@@ -39,7 +39,7 @@ jobs:
             Sort-Object Name |
             ForEach-Object {
               $h = Get-FileHash $_.FullName -Algorithm SHA256
-              "{0}  {1}" -f $h.Hash, $_.Name
+              "{0}  {1}" -f $h.Hash.ToLower(), $_.Name
             } | Out-File -FilePath $sumfile -Encoding ASCII
           Write-Host "Checksums written to $sumfile"
           Get-Content $sumfile
@@ -57,8 +57,8 @@ jobs:
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: |
-            x64/Release/Loader.exe
-            x64/Release/HookCore.dll
+            x64/Release/Host.exe
+            x64/Release/Agent.dll
             x64/Release/SHA256SUMS.txt
 
       - name: Upload build artifact (Actions UI)

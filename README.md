@@ -66,8 +66,8 @@
 - If you do not trust the release, **build from source** or verify SHA256 checksums in `SHA256SUMS.txt`
 - Verification commands:
 ```powershell
-CertUtil -hashfile .\x64\Release\Loader.exe SHA256
-CertUtil -hashfile .\x64\Release\HookCore.dll SHA256
+CertUtil -hashfile .\x64\Release\Host.exe SHA256
+CertUtil -hashfile .\x64\Release\Agent.dll SHA256
 ```
 
 ## Build Instructions
@@ -103,7 +103,7 @@ cd .\x64\Release\
 
 2. **Run the Loader**:
 ```powershell
-.\Loader.exe
+.\Host.exe
 ```
 
 3. **Expected Behavior**:
