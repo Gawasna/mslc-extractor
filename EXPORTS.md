@@ -1,0 +1,2314 @@
+# Core (microsoft.cognitiveservices.speech.core.dll)
+
+Địa chỉ=00007FFC13A38090
+Ordinal=0
+Symbol=OptionalHeader.AddressOfEntryPoint
+
+Địa chỉ=00007FFC138C1AA0
+Ordinal=1
+Symbol=CreateModuleObject
+
+Địa chỉ=00007FFC138C1AB0
+Ordinal=2
+Symbol=GetModuleObject
+
+Địa chỉ=00007FFC138D0DB0
+Ordinal=3
+Symbol=add_source_lang_config_to_auto_detect_source_lang_config
+
+Địa chỉ=00007FFC13905FC0
+Ordinal=4
+Symbol=ai_core_json_builder_create
+
+Địa chỉ=00007FFC13906020
+Ordinal=5
+Symbol=ai_core_json_builder_handle_is_valid
+
+Địa chỉ=00007FFC13906030
+Ordinal=6
+Symbol=ai_core_json_builder_handle_release
+
+Địa chỉ=00007FFC13906600
+Ordinal=7
+Symbol=ai_core_json_builder_item_add
+
+Địa chỉ=00007FFC13906690
+Ordinal=8
+Symbol=ai_core_json_builder_item_set
+
+Địa chỉ=00007FFC13906080
+Ordinal=9
+Symbol=ai_core_json_item_at
+
+Địa chỉ=00007FFC13906040
+Ordinal=10
+Symbol=ai_core_json_item_count
+
+Địa chỉ=00007FFC13906220
+Ordinal=11
+Symbol=ai_core_json_item_name
+
+Địa chỉ=00007FFC13906190
+Ordinal=12
+Symbol=ai_core_json_item_next
+
+Địa chỉ=00007FFC13905F50
+Ordinal=13
+Symbol=ai_core_json_parser_create
+
+Địa chỉ=00007FFC13905FA0
+Ordinal=14
+Symbol=ai_core_json_parser_handle_is_valid
+
+Địa chỉ=00007FFC13905FB0
+Ordinal=15
+Symbol=ai_core_json_parser_handle_release
+
+Địa chỉ=00007FFC139062C0
+Ordinal=16
+Symbol=ai_core_json_value_as_bool
+
+Địa chỉ=00007FFC13906310
+Ordinal=17
+Symbol=ai_core_json_value_as_double
+
+Địa chỉ=00007FFC13906360
+Ordinal=18
+Symbol=ai_core_json_value_as_int
+
+Địa chỉ=00007FFC13906510
+Ordinal=19
+Symbol=ai_core_json_value_as_json_copy
+
+Địa chỉ=00007FFC13906450
+Ordinal=20
+Symbol=ai_core_json_value_as_string_copy
+
+Địa chỉ=00007FFC13906400
+Ordinal=21
+Symbol=ai_core_json_value_as_string_ptr
+
+Địa chỉ=00007FFC139063B0
+Ordinal=22
+Symbol=ai_core_json_value_as_uint
+
+Địa chỉ=00007FFC13906280
+Ordinal=23
+Symbol=ai_core_json_value_kind
+
+Địa chỉ=00007FFC13905E90
+Ordinal=24
+Symbol=ai_core_string_create
+
+Địa chỉ=00007FFC13905F00
+Ordinal=25
+Symbol=ai_core_string_free
+
+Địa chỉ=00007FFC138C7A70
+Ordinal=26
+Symbol=audio_config_create_audio_input_from_a_microphone
+
+Địa chỉ=00007FFC138C7950
+Ordinal=27
+Symbol=audio_config_create_audio_input_from_default_microphone
+
+Địa chỉ=00007FFC138C7D00
+Ordinal=28
+Symbol=audio_config_create_audio_input_from_stream
+
+Địa chỉ=00007FFC138C7BC0
+Ordinal=29
+Symbol=audio_config_create_audio_input_from_wav_file_name
+
+Địa chỉ=00007FFC138C8210
+Ordinal=30
+Symbol=audio_config_create_audio_output_from_a_speaker
+
+Địa chỉ=00007FFC138C80F0
+Ordinal=31
+Symbol=audio_config_create_audio_output_from_default_speaker
+
+Địa chỉ=00007FFC138C84A0
+Ordinal=32
+Symbol=audio_config_create_audio_output_from_stream
+
+Địa chỉ=00007FFC138C8360
+Ordinal=33
+Symbol=audio_config_create_audio_output_from_wav_file_name
+
+Địa chỉ=00007FFC138C7FB0
+Ordinal=34
+Symbol=audio_config_create_pull_audio_input_stream
+
+Địa chỉ=00007FFC138C7E70
+Ordinal=35
+Symbol=audio_config_create_push_audio_input_stream
+
+Địa chỉ=00007FFC138C8890
+Ordinal=36
+Symbol=audio_config_get_audio_processing_options
+
+Địa chỉ=00007FFC138C8620
+Ordinal=37
+Symbol=audio_config_get_property_bag
+
+Địa chỉ=00007FFC138C7940
+Ordinal=38
+Symbol=audio_config_is_handle_valid
+
+Địa chỉ=00007FFC138C8610
+Ordinal=39
+Symbol=audio_config_release
+
+Địa chỉ=00007FFC138C8630
+Ordinal=40
+Symbol=audio_config_set_audio_processing_options
+
+Địa chỉ=00007FFC138CEA30
+Ordinal=41
+Symbol=audio_data_stream_can_read_data
+
+Địa chỉ=00007FFC138CEAB0
+Ordinal=42
+Symbol=audio_data_stream_can_read_data_from_position
+
+Địa chỉ=00007FFC138CE240
+Ordinal=43
+Symbol=audio_data_stream_create_from_file
+
+Địa chỉ=00007FFC138CE4E0
+Ordinal=44
+Symbol=audio_data_stream_create_from_keyword_result
+
+Địa chỉ=00007FFC138CE3C0
+Ordinal=45
+Symbol=audio_data_stream_create_from_result
+
+Địa chỉ=00007FFC138CEFD0
+Ordinal=46
+Symbol=audio_data_stream_detach_input
+
+Địa chỉ=00007FFC138CE8E0
+Ordinal=47
+Symbol=audio_data_stream_get_canceled_error_code
+
+Địa chỉ=00007FFC138CEE30
+Ordinal=48
+Symbol=audio_data_stream_get_position
+
+Địa chỉ=00007FFC138CF090
+Ordinal=49
+Symbol=audio_data_stream_get_property_bag
+
+Địa chỉ=00007FFC138CE800
+Ordinal=50
+Symbol=audio_data_stream_get_reason_canceled
+
+Địa chỉ=00007FFC138CE720
+Ordinal=51
+Symbol=audio_data_stream_get_status
+
+Địa chỉ=00007FFC138CE230
+Ordinal=52
+Symbol=audio_data_stream_is_handle_valid
+
+Địa chỉ=00007FFC138CEB30
+Ordinal=53
+Symbol=audio_data_stream_read
+
+Địa chỉ=00007FFC138CEC30
+Ordinal=54
+Symbol=audio_data_stream_read_from_position
+
+Địa chỉ=00007FFC138CF0A0
+Ordinal=55
+Symbol=audio_data_stream_release
+
+Địa chỉ=00007FFC138CED40
+Ordinal=56
+Symbol=audio_data_stream_save_to_wave_file
+
+Địa chỉ=00007FFC138CEF10
+Ordinal=57
+Symbol=audio_data_stream_set_position
+
+Địa chỉ=00007FFC138CB7D0
+Ordinal=58
+Symbol=audio_processing_options_create
+
+Địa chỉ=00007FFC138CBA30
+Ordinal=59
+Symbol=audio_processing_options_create_from_microphone_array_geometry
+
+Địa chỉ=00007FFC138CB900
+Ordinal=60
+Symbol=audio_processing_options_create_from_preset_microphone_array_geometry
+
+Địa chỉ=00007FFC138CBC70
+Ordinal=61
+Symbol=audio_processing_options_get_audio_processing_flags
+
+Địa chỉ=00007FFC138CC070
+Ordinal=62
+Symbol=audio_processing_options_get_beamforming_end_angle
+
+Địa chỉ=00007FFC138CBF70
+Ordinal=63
+Symbol=audio_processing_options_get_beamforming_start_angle
+
+Địa chỉ=00007FFC138CBE70
+Ordinal=64
+Symbol=audio_processing_options_get_microphone_array_type
+
+Địa chỉ=00007FFC138CC290
+Ordinal=65
+Symbol=audio_processing_options_get_microphone_coordinates
+
+Địa chỉ=00007FFC138CC180
+Ordinal=66
+Symbol=audio_processing_options_get_microphone_count
+
+Địa chỉ=00007FFC138CBD70
+Ordinal=67
+Symbol=audio_processing_options_get_preset_microphone_array_geometry
+
+Địa chỉ=00007FFC138CC560
+Ordinal=68
+Symbol=audio_processing_options_get_property_bag
+
+Địa chỉ=00007FFC138CC440
+Ordinal=69
+Symbol=audio_processing_options_get_speaker_reference_channel
+
+Địa chỉ=00007FFC138CB7C0
+Ordinal=70
+Symbol=audio_processing_options_is_handle_valid
+
+Địa chỉ=00007FFC138CC550
+Ordinal=71
+Symbol=audio_processing_options_release
+
+Địa chỉ=00007FFC138CD630
+Ordinal=72
+Symbol=audio_stream_create_pull_audio_input_stream
+
+Địa chỉ=00007FFC138CD7D0
+Ordinal=73
+Symbol=audio_stream_create_pull_audio_output_stream
+
+Địa chỉ=00007FFC138CD490
+Ordinal=74
+Symbol=audio_stream_create_push_audio_input_stream
+
+Địa chỉ=00007FFC138CD920
+Ordinal=75
+Symbol=audio_stream_create_push_audio_output_stream
+
+Địa chỉ=00007FFC138CD0B0
+Ordinal=76
+Symbol=audio_stream_format_create_from_compressed_format
+
+Địa chỉ=00007FFC138CCEA0
+Ordinal=77
+Symbol=audio_stream_format_create_from_default_input
+
+Địa chỉ=00007FFC138CCEA0
+Ordinal=78
+Symbol=audio_stream_format_create_from_default_output
+
+Địa chỉ=00007FFC138CCEF0
+Ordinal=79
+Symbol=audio_stream_format_create_from_waveformat
+
+Địa chỉ=00007FFC138CCED0
+Ordinal=80
+Symbol=audio_stream_format_create_from_waveformat_pcm
+
+Địa chỉ=00007FFC138CCE90
+Ordinal=81
+Symbol=audio_stream_format_is_handle_valid
+
+Địa chỉ=00007FFC138CD1C0
+Ordinal=82
+Symbol=audio_stream_format_release
+
+Địa chỉ=00007FFC138CD480
+Ordinal=83
+Symbol=audio_stream_is_handle_valid
+
+Địa chỉ=00007FFC138CDA70
+Ordinal=84
+Symbol=audio_stream_release
+
+Địa chỉ=00007FFC138D0FF0
+Ordinal=85
+Symbol=auto_detect_source_lang_config_get_property_bag
+
+Địa chỉ=00007FFC138D0FD0
+Ordinal=86
+Symbol=auto_detect_source_lang_config_is_handle_valid
+
+Địa chỉ=00007FFC138D0FE0
+Ordinal=87
+Symbol=auto_detect_source_lang_config_release
+
+Địa chỉ=00007FFC138DD860
+Ordinal=88
+Symbol=bot_framework_config_from_authorization_token
+
+Địa chỉ=00007FFC138DD6E0
+Ordinal=89
+Symbol=bot_framework_config_from_subscription
+
+Địa chỉ=00007FFC138EB250
+Ordinal=90
+Symbol=class_language_model_assign_class
+
+Địa chỉ=00007FFC138EB220
+Ordinal=91
+Symbol=class_language_model_from_storage_id
+
+Địa chỉ=00007FFC138D2320
+Ordinal=92
+Symbol=connection_async_handle_release
+
+Địa chỉ=00007FFC138D1C00
+Ordinal=93
+Symbol=connection_close
+
+Địa chỉ=00007FFC138D1940
+Ordinal=94
+Symbol=connection_connected_set_callback
+
+Địa chỉ=00007FFC138D1A10
+Ordinal=95
+Symbol=connection_disconnected_set_callback
+
+Địa chỉ=00007FFC138D18F0
+Ordinal=96
+Symbol=connection_from_conversation_translator
+
+Địa chỉ=00007FFC138D1900
+Ordinal=97
+Symbol=connection_from_dialog_service_connector
+
+Địa chỉ=00007FFC138D18E0
+Ordinal=98
+Symbol=connection_from_recognizer
+
+Địa chỉ=00007FFC138D1910
+Ordinal=99
+Symbol=connection_from_speech_synthesizer
+
+Địa chỉ=00007FFC138D2640
+Ordinal=100
+Symbol=connection_get_property_bag
+
+Địa chỉ=00007FFC138D1920
+Ordinal=101
+Symbol=connection_handle_is_valid
+
+Địa chỉ=00007FFC138D1930
+Ordinal=102
+Symbol=connection_handle_release
+
+Địa chỉ=00007FFC138D2480
+Ordinal=103
+Symbol=connection_message_get_data
+
+Địa chỉ=00007FFC138D25C0
+Ordinal=104
+Symbol=connection_message_get_data_size
+
+Địa chỉ=00007FFC138D2470
+Ordinal=105
+Symbol=connection_message_get_property_bag
+
+Địa chỉ=00007FFC138D2450
+Ordinal=106
+Symbol=connection_message_handle_is_valid
+
+Địa chỉ=00007FFC138D2460
+Ordinal=107
+Symbol=connection_message_handle_release
+
+Địa chỉ=00007FFC138D2350
+Ordinal=108
+Symbol=connection_message_received_event_get_message
+
+Địa chỉ=00007FFC138D2330
+Ordinal=109
+Symbol=connection_message_received_event_handle_is_valid
+
+Địa chỉ=00007FFC138D2340
+Ordinal=110
+Symbol=connection_message_received_event_handle_release
+
+Địa chỉ=00007FFC138D1AE0
+Ordinal=111
+Symbol=connection_message_received_set_callback
+
+Địa chỉ=00007FFC138D1B00
+Ordinal=112
+Symbol=connection_open
+
+Địa chỉ=00007FFC138D2040
+Ordinal=113
+Symbol=connection_send_message
+
+Địa chỉ=00007FFC138D1E80
+Ordinal=114
+Symbol=connection_send_message_async
+
+Địa chỉ=00007FFC138D2070
+Ordinal=115
+Symbol=connection_send_message_data
+
+Địa chỉ=00007FFC138D20B0
+Ordinal=116
+Symbol=connection_send_message_data_async
+
+Địa chỉ=00007FFC138D22F0
+Ordinal=117
+Symbol=connection_send_message_wait_for
+
+Địa chỉ=00007FFC138D1CF0
+Ordinal=118
+Symbol=connection_set_message_property
+
+Địa chỉ=00007FFC138E7180
+Ordinal=119
+Symbol=conversation_create_from_config
+
+Địa chỉ=00007FFC138DB810
+Ordinal=120
+Symbol=conversation_delete_conversation
+
+Địa chỉ=00007FFC138DB6A0
+Ordinal=121
+Symbol=conversation_end_conversation
+
+Địa chỉ=00007FFC138DB530
+Ordinal=122
+Symbol=conversation_get_conversation_id
+
+Địa chỉ=00007FFC138DB750
+Ordinal=123
+Symbol=conversation_get_property_bag
+
+Địa chỉ=00007FFC138DB8C0
+Ordinal=124
+Symbol=conversation_lock_conversation
+
+Địa chỉ=00007FFC138DBA20
+Ordinal=125
+Symbol=conversation_mute_all_participants
+
+Địa chỉ=00007FFC138DBBA0
+Ordinal=126
+Symbol=conversation_mute_participant
+
+Địa chỉ=00007FFC138DBDC0
+Ordinal=127
+Symbol=conversation_release_handle
+
+Địa chỉ=00007FFC138DB760
+Ordinal=128
+Symbol=conversation_start_conversation
+
+Địa chỉ=00007FFC138D4D30
+Ordinal=129
+Symbol=conversation_transcription_result_get_speaker_id
+
+Địa chỉ=00007FFC138D6580
+Ordinal=130
+Symbol=conversation_translator_canceled_set_callback
+
+Địa chỉ=00007FFC138D6460
+Ordinal=131
+Symbol=conversation_translator_connection_connected_set_callback
+
+Địa chỉ=00007FFC138D64F0
+Ordinal=132
+Symbol=conversation_translator_connection_disconnected_set_callback
+
+Địa chỉ=00007FFC138D65C0
+Ordinal=133
+Symbol=conversation_translator_conversation_expiration_set_callback
+
+Địa chỉ=00007FFC138E9240
+Ordinal=134
+Symbol=conversation_translator_create_from_config
+
+Địa chỉ=00007FFC138D6760
+Ordinal=135
+Symbol=conversation_translator_event_get_expiration_time
+
+Địa chỉ=00007FFC138D67C0
+Ordinal=136
+Symbol=conversation_translator_event_get_participant_changed_at_index
+
+Địa chỉ=00007FFC138D6790
+Ordinal=137
+Symbol=conversation_translator_event_get_participant_changed_reason
+
+Địa chỉ=00007FFC138D66F0
+Ordinal=138
+Symbol=conversation_translator_event_handle_is_valid
+
+Địa chỉ=00007FFC138D6640
+Ordinal=139
+Symbol=conversation_translator_event_handle_release
+
+Địa chỉ=00007FFC138D5890
+Ordinal=140
+Symbol=conversation_translator_get_property_bag
+
+Địa chỉ=00007FFC138D6230
+Ordinal=141
+Symbol=conversation_translator_handle_is_valid
+
+Địa chỉ=00007FFC138D6260
+Ordinal=142
+Symbol=conversation_translator_handle_release
+
+Địa chỉ=00007FFC138D58A0
+Ordinal=143
+Symbol=conversation_translator_join
+
+Địa chỉ=00007FFC138D59D0
+Ordinal=144
+Symbol=conversation_translator_join_with_id
+
+Địa chỉ=00007FFC138D61A0
+Ordinal=145
+Symbol=conversation_translator_leave
+
+Địa chỉ=00007FFC138D6B40
+Ordinal=146
+Symbol=conversation_translator_participant_get_avatar
+
+Địa chỉ=00007FFC138D6B70
+Ordinal=147
+Symbol=conversation_translator_participant_get_displayname
+
+Địa chỉ=00007FFC138D6BA0
+Ordinal=148
+Symbol=conversation_translator_participant_get_id
+
+Địa chỉ=00007FFC138D6C00
+Ordinal=149
+Symbol=conversation_translator_participant_get_is_host
+
+Địa chỉ=00007FFC138D6BD0
+Ordinal=150
+Symbol=conversation_translator_participant_get_is_muted
+
+Địa chỉ=00007FFC138D6C30
+Ordinal=151
+Symbol=conversation_translator_participant_get_is_using_tts
+
+Địa chỉ=00007FFC138D65A0
+Ordinal=152
+Symbol=conversation_translator_participants_changed_set_callback
+
+Địa chỉ=00007FFC138D6B10
+Ordinal=153
+Symbol=conversation_translator_result_get_original_lang
+
+Địa chỉ=00007FFC138D6980
+Ordinal=154
+Symbol=conversation_translator_result_get_user_id
+
+Địa chỉ=00007FFC138D5FF0
+Ordinal=155
+Symbol=conversation_translator_send_text_message
+
+Địa chỉ=00007FFC138D62A0
+Ordinal=156
+Symbol=conversation_translator_session_started_set_callback
+
+Địa chỉ=00007FFC138D62C0
+Ordinal=157
+Symbol=conversation_translator_session_stopped_set_callback
+
+Địa chỉ=00007FFC138D60B0
+Ordinal=158
+Symbol=conversation_translator_set_authorization_token
+
+Địa chỉ=00007FFC138D5ED0
+Ordinal=159
+Symbol=conversation_translator_start_transcribing
+
+Địa chỉ=00007FFC138D5F60
+Ordinal=160
+Symbol=conversation_translator_stop_transcribing
+
+Địa chỉ=00007FFC138D6620
+Ordinal=161
+Symbol=conversation_translator_text_message_recevied_set_callback
+
+Địa chỉ=00007FFC138D6600
+Ordinal=162
+Symbol=conversation_translator_transcribed_set_callback
+
+Địa chỉ=00007FFC138D65E0
+Ordinal=163
+Symbol=conversation_translator_transcribing_set_callback
+
+Địa chỉ=00007FFC138DB970
+Ordinal=164
+Symbol=conversation_unlock_conversation
+
+Địa chỉ=00007FFC138DBAE0
+Ordinal=165
+Symbol=conversation_unmute_all_participants
+
+Địa chỉ=00007FFC138DBCB0
+Ordinal=166
+Symbol=conversation_unmute_participant
+
+Địa chỉ=00007FFC138DB310
+Ordinal=167
+Symbol=conversation_update_participant
+
+Địa chỉ=00007FFC138DB1B0
+Ordinal=168
+Symbol=conversation_update_participant_by_user
+
+Địa chỉ=00007FFC138DB090
+Ordinal=169
+Symbol=conversation_update_participant_by_user_id
+
+Địa chỉ=00007FFC138D0A50
+Ordinal=170
+Symbol=create_auto_detect_source_lang_config_from_languages
+
+Địa chỉ=00007FFC138D0920
+Ordinal=171
+Symbol=create_auto_detect_source_lang_config_from_open_range
+
+Địa chỉ=00007FFC138D0BA0
+Ordinal=172
+Symbol=create_auto_detect_source_lang_config_from_source_lang_config
+
+Địa chỉ=00007FFC138F33B0
+Ordinal=173
+Symbol=create_pronunciation_assessment_config
+
+Địa chỉ=00007FFC138F3500
+Ordinal=174
+Symbol=create_pronunciation_assessment_config_from_json
+
+Địa chỉ=00007FFC138F9110
+Ordinal=175
+Symbol=create_voice_profile
+
+Địa chỉ=00007FFC138E9600
+Ordinal=176
+Symbol=create_voice_profile_client_from_config
+
+Địa chỉ=00007FFC138F8920
+Ordinal=177
+Symbol=create_voice_profile_from_id_and_type
+
+Địa chỉ=00007FFC138DDB70
+Ordinal=178
+Symbol=custom_commands_config_from_authorization_token
+
+Địa chỉ=00007FFC138DD9E0
+Ordinal=179
+Symbol=custom_commands_config_from_subscription
+
+Địa chỉ=00007FFC138F9380
+Ordinal=180
+Symbol=delete_voice_profile
+
+Địa chỉ=00007FFC13904B60
+Ordinal=181
+Symbol=diagnostics_eventsource_logmessage_set_callback
+
+Địa chỉ=00007FFC13904B90
+Ordinal=182
+Symbol=diagnostics_eventsource_logmessage_set_filters
+
+Địa chỉ=00007FFC13904F60
+Ordinal=183
+Symbol=diagnostics_free_string
+
+Địa chỉ=00007FFC13904EC0
+Ordinal=184
+Symbol=diagnostics_get_handle_count
+
+Địa chỉ=00007FFC13904ED0
+Ordinal=185
+Symbol=diagnostics_get_handle_info
+
+Địa chỉ=00007FFC13904A40
+Ordinal=186
+Symbol=diagnostics_is_log_level_enabled
+
+Địa chỉ=00007FFC13904900
+Ordinal=187
+Symbol=diagnostics_log_apply_properties
+
+Địa chỉ=00007FFC13904E30
+Ordinal=188
+Symbol=diagnostics_log_console_set_filters
+
+Địa chỉ=00007FFC13904DF0
+Ordinal=189
+Symbol=diagnostics_log_console_start_logging
+
+Địa chỉ=00007FFC13904E10
+Ordinal=190
+Symbol=diagnostics_log_console_stop_logging
+
+Địa chỉ=00007FFC13904AC0
+Ordinal=191
+Symbol=diagnostics_log_format_message
+
+Địa chỉ=00007FFC13904C90
+Ordinal=192
+Symbol=diagnostics_log_memory_dump
+
+Địa chỉ=00007FFC13904D40
+Ordinal=193
+Symbol=diagnostics_log_memory_dump_on_exit
+
+Địa chỉ=00007FFC13904C80
+Ordinal=194
+Symbol=diagnostics_log_memory_dump_to_stderr
+
+Địa chỉ=00007FFC13904C60
+Ordinal=195
+Symbol=diagnostics_log_memory_get_line
+
+Địa chỉ=00007FFC13904C40
+Ordinal=196
+Symbol=diagnostics_log_memory_get_line_num_newest
+
+Địa chỉ=00007FFC13904C20
+Ordinal=197
+Symbol=diagnostics_log_memory_get_line_num_oldest
+
+Địa chỉ=00007FFC13904C00
+Ordinal=198
+Symbol=diagnostics_log_memory_set_filters
+
+Địa chỉ=00007FFC13904BC0
+Ordinal=199
+Symbol=diagnostics_log_memory_start_logging
+
+Địa chỉ=00007FFC13904BE0
+Ordinal=200
+Symbol=diagnostics_log_memory_stop_logging
+
+Địa chỉ=00007FFC139047E0
+Ordinal=201
+Symbol=diagnostics_log_start_logging
+
+Địa chỉ=00007FFC13904A20
+Ordinal=202
+Symbol=diagnostics_log_stop_logging
+
+Địa chỉ=00007FFC13904A60
+Ordinal=203
+Symbol=diagnostics_log_trace_message
+
+Địa chỉ=00007FFC13904A90
+Ordinal=204
+Symbol=diagnostics_log_trace_message
+2
+Địa chỉ=00007FFC13904A50
+Ordinal=205
+Symbol=diagnostics_log_trace_string
+
+Địa chỉ=00007FFC13904B00
+Ordinal=206
+Symbol=diagnostics_logmessage_set_callback
+
+Địa chỉ=00007FFC13904B30
+Ordinal=207
+Symbol=diagnostics_logmessage_set_filters
+
+Địa chỉ=00007FFC13904E50
+Ordinal=208
+Symbol=diagnostics_set_log_level
+
+Địa chỉ=00007FFC138DFBB0
+Ordinal=209
+Symbol=dialog_service_connector_activity_received_event_get_activity
+
+Địa chỉ=00007FFC138DFAA0
+Ordinal=210
+Symbol=dialog_service_connector_activity_received_event_get_activity_size
+
+Địa chỉ=00007FFC138DFDC0
+Ordinal=211
+Symbol=dialog_service_connector_activity_received_event_get_audio
+
+Địa chỉ=00007FFC138DEC10
+Ordinal=212
+Symbol=dialog_service_connector_activity_received_event_handle_is_valid
+
+Địa chỉ=00007FFC138DFD40
+Ordinal=213
+Symbol=dialog_service_connector_activity_received_event_has_audio
+
+Địa chỉ=00007FFC138DEC20
+Ordinal=214
+Symbol=dialog_service_connector_activity_received_event_release
+
+Địa chỉ=00007FFC138DFA40
+Ordinal=215
+Symbol=dialog_service_connector_activity_received_set_callback
+
+Địa chỉ=00007FFC138DEBB0
+Ordinal=216
+Symbol=dialog_service_connector_async_handle_is_valid
+
+Địa chỉ=00007FFC138DEBC0
+Ordinal=217
+Symbol=dialog_service_connector_async_handle_release
+
+Địa chỉ=00007FFC138DEBB0
+Ordinal=218
+Symbol=dialog_service_connector_async_reco_result_handle_is_valid
+
+Địa chỉ=00007FFC138DEBC0
+Ordinal=219
+Symbol=dialog_service_connector_async_reco_result_handle_release
+
+Địa chỉ=00007FFC138DEBF0
+Ordinal=220
+Symbol=dialog_service_connector_async_string_handle_is_valid
+
+Địa chỉ=00007FFC138DEC00
+Ordinal=221
+Symbol=dialog_service_connector_async_string_handle_release
+
+Địa chỉ=00007FFC138DEBD0
+Ordinal=222
+Symbol=dialog_service_connector_async_void_handle_is_valid
+
+Địa chỉ=00007FFC138DEBE0
+Ordinal=223
+Symbol=dialog_service_connector_async_void_handle_release
+
+Địa chỉ=00007FFC138DFA20
+Ordinal=224
+Symbol=dialog_service_connector_canceled_set_callback
+
+Địa chỉ=00007FFC138DECC0
+Ordinal=225
+Symbol=dialog_service_connector_connect
+
+Địa chỉ=00007FFC138DECE0
+Ordinal=226
+Symbol=dialog_service_connector_connect_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=227
+Symbol=dialog_service_connector_connect_async_wait_for
+
+Địa chỉ=00007FFC138E4AF0
+Ordinal=228
+Symbol=dialog_service_connector_create_dialog_service_connector_from_config
+
+Địa chỉ=00007FFC138DEDF0
+Ordinal=229
+Symbol=dialog_service_connector_disconnect
+
+Địa chỉ=00007FFC138DEE10
+Ordinal=230
+Symbol=dialog_service_connector_disconnect_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=231
+Symbol=dialog_service_connector_disconnect_async_wait_for
+
+Địa chỉ=00007FFC138DEC50
+Ordinal=232
+Symbol=dialog_service_connector_get_property_bag
+
+Địa chỉ=00007FFC138DEB90
+Ordinal=233
+Symbol=dialog_service_connector_handle_is_valid
+
+Địa chỉ=00007FFC138DEBA0
+Ordinal=234
+Symbol=dialog_service_connector_handle_release
+
+Địa chỉ=00007FFC138DF5F0
+Ordinal=235
+Symbol=dialog_service_connector_listen_once
+
+Địa chỉ=00007FFC138DF610
+Ordinal=236
+Symbol=dialog_service_connector_listen_once_async
+
+Địa chỉ=00007FFC138DF710
+Ordinal=237
+Symbol=dialog_service_connector_listen_once_async_wait_for
+
+Địa chỉ=00007FFC138DF9E0
+Ordinal=238
+Symbol=dialog_service_connector_recognized_set_callback
+
+Địa chỉ=00007FFC138DFA00
+Ordinal=239
+Symbol=dialog_service_connector_recognizing_set_callback
+
+Địa chỉ=00007FFC138DEF10
+Ordinal=240
+Symbol=dialog_service_connector_send_activity
+
+Địa chỉ=00007FFC138DF040
+Ordinal=241
+Symbol=dialog_service_connector_send_activity_async
+
+Địa chỉ=00007FFC138DF1F0
+Ordinal=242
+Symbol=dialog_service_connector_send_activity_async_wait_for
+
+Địa chỉ=00007FFC138DF960
+Ordinal=243
+Symbol=dialog_service_connector_session_started_set_callback
+
+Địa chỉ=00007FFC138DF980
+Ordinal=244
+Symbol=dialog_service_connector_session_stopped_set_callback
+
+Địa chỉ=00007FFC138DF9C0
+Ordinal=245
+Symbol=dialog_service_connector_speech_end_detected_set_callback
+
+Địa chỉ=00007FFC138DF9A0
+Ordinal=246
+Symbol=dialog_service_connector_speech_start_detected_set_callback
+
+Địa chỉ=00007FFC138DF720
+Ordinal=247
+Symbol=dialog_service_connector_start_continuous_listening
+
+Địa chỉ=00007FFC138DF740
+Ordinal=248
+Symbol=dialog_service_connector_start_continuous_listening_async
+
+Địa chỉ=00007FFC138DF360
+Ordinal=249
+Symbol=dialog_service_connector_start_keyword_recognition
+
+Địa chỉ=00007FFC138DF390
+Ordinal=250
+Symbol=dialog_service_connector_start_keyword_recognition_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=251
+Symbol=dialog_service_connector_start_keyword_recognition_async_wait_for
+
+Địa chỉ=00007FFC138DF4D0
+Ordinal=252
+Symbol=dialog_service_connector_stop_keyword_recognition
+
+Địa chỉ=00007FFC138DF4F0
+Ordinal=253
+Symbol=dialog_service_connector_stop_keyword_recognition_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=254
+Symbol=dialog_service_connector_stop_keyword_recognition_async_wait_for
+
+Địa chỉ=00007FFC138DF840
+Ordinal=255
+Symbol=dialog_service_connector_stop_listening
+
+Địa chỉ=00007FFC138DF860
+Ordinal=256
+Symbol=dialog_service_connector_stop_listening_async
+
+Địa chỉ=00007FFC138DFA80
+Ordinal=257
+Symbol=dialog_service_connector_synthesizing_audio_set_callback
+
+Địa chỉ=00007FFC138E0340
+Ordinal=258
+Symbol=dialog_service_connector_turn_status_received_get_conversation_id
+
+Địa chỉ=00007FFC138E0230
+Ordinal=259
+Symbol=dialog_service_connector_turn_status_received_get_conversation_id_size
+
+Địa chỉ=00007FFC138E00A0
+Ordinal=260
+Symbol=dialog_service_connector_turn_status_received_get_interaction_id
+
+Địa chỉ=00007FFC138DFF90
+Ordinal=261
+Symbol=dialog_service_connector_turn_status_received_get_interaction_id_size
+
+Địa chỉ=00007FFC138E04D0
+Ordinal=262
+Symbol=dialog_service_connector_turn_status_received_get_status
+
+Địa chỉ=00007FFC138DEC30
+Ordinal=263
+Symbol=dialog_service_connector_turn_status_received_handle_is_valid
+
+Địa chỉ=00007FFC138DEC40
+Ordinal=264
+Symbol=dialog_service_connector_turn_status_received_release
+
+Địa chỉ=00007FFC138DFA60
+Ordinal=265
+Symbol=dialog_service_connector_turn_status_received_set_callback
+
+Địa chỉ=00007FFC138E2AE0
+Ordinal=266
+Symbol=embedded_speech_config_add_path
+
+Địa chỉ=00007FFC138E28E0
+Ordinal=267
+Symbol=embedded_speech_config_create
+
+Địa chỉ=00007FFC138E2C70
+Ordinal=268
+Symbol=embedded_speech_config_get_num_speech_reco_models
+
+Địa chỉ=00007FFC138E3020
+Ordinal=269
+Symbol=embedded_speech_config_get_num_speech_translation_models
+
+Địa chỉ=00007FFC138E2E00
+Ordinal=270
+Symbol=embedded_speech_config_get_speech_reco_model
+
+Địa chỉ=00007FFC138E31B0
+Ordinal=271
+Symbol=embedded_speech_config_get_speech_translation_model
+
+Địa chỉ=00007FFC138E3680
+Ordinal=272
+Symbol=embedded_speech_config_set_keyword_recognition_model
+
+Địa chỉ=00007FFC138E33D0
+Ordinal=273
+Symbol=embedded_speech_config_set_model
+
+Địa chỉ=00007FFC138E3540
+Ordinal=274
+Symbol=embedded_speech_config_set_speech_recognition_model
+
+Địa chỉ=00007FFC138E35B0
+Ordinal=275
+Symbol=embedded_speech_config_set_speech_synthesis_voice
+
+Địa chỉ=00007FFC138E3610
+Ordinal=276
+Symbol=embedded_speech_config_set_speech_translation_model
+
+Địa chỉ=00007FFC138F8D20
+Ordinal=277
+Symbol=enroll_voice_profile
+
+Địa chỉ=00007FFC13905480
+Ordinal=278
+Symbol=error_get_call_stack
+
+Địa chỉ=00007FFC139054A0
+Ordinal=279
+Symbol=error_get_error_code
+
+Địa chỉ=00007FFC139054C0
+Ordinal=280
+Symbol=error_get_message
+
+Địa chỉ=00007FFC139054F0
+Ordinal=281
+Symbol=error_release
+
+Địa chỉ=00007FFC138F9A90
+Ordinal=282
+Symbol=get_activation_phrases
+
+Địa chỉ=00007FFC138F96E0
+Ordinal=283
+Symbol=get_profiles_json
+
+Địa chỉ=00007FFC138EB190
+Ordinal=284
+Symbol=grammar_create_from_storage_id
+
+Địa chỉ=00007FFC138EB0C0
+Ordinal=285
+Symbol=grammar_handle_is_valid
+
+Địa chỉ=00007FFC138EB0D0
+Ordinal=286
+Symbol=grammar_handle_release
+
+Địa chỉ=00007FFC138EB1E0
+Ordinal=287
+Symbol=grammar_list_add_grammar
+
+Địa chỉ=00007FFC138EB1C0
+Ordinal=288
+Symbol=grammar_list_from_recognizer
+
+Địa chỉ=00007FFC138EB200
+Ordinal=289
+Symbol=grammar_list_set_recognition_factor
+
+Địa chỉ=00007FFC138EB160
+Ordinal=290
+Symbol=grammar_phrase_create_from_text
+
+Địa chỉ=00007FFC138EB140
+Ordinal=291
+Symbol=grammar_phrase_handle_is_valid
+
+Địa chỉ=00007FFC138EB150
+Ordinal=292
+Symbol=grammar_phrase_handle_release
+
+Địa chỉ=00007FFC138ED010
+Ordinal=293
+Symbol=hybrid_speech_config_create
+
+Địa chỉ=00007FFC138EF340
+Ordinal=294
+Symbol=intent_recognizer_add_conversational_language_understanding_model
+
+Địa chỉ=00007FFC138EE6B0
+Ordinal=295
+Symbol=intent_recognizer_add_intent
+
+Địa chỉ=00007FFC138EE800
+Ordinal=296
+Symbol=intent_recognizer_add_intent_with_model_id
+
+Địa chỉ=00007FFC138EF600
+Ordinal=297
+Symbol=intent_recognizer_clear_language_models
+
+Địa chỉ=00007FFC138EEB30
+Ordinal=298
+Symbol=intent_recognizer_import_pattern_matching_model
+
+Địa chỉ=00007FFC138EE950
+Ordinal=299
+Symbol=intent_recognizer_recognize_text_once
+
+Địa chỉ=00007FFC138EFFE0
+Ordinal=300
+Symbol=intent_result_get_intent_id
+
+Địa chỉ=00007FFC138F0400
+Ordinal=301
+Symbol=intent_trigger_create_from_language_understanding_model
+
+Địa chỉ=00007FFC138F02B0
+Ordinal=302
+Symbol=intent_trigger_create_from_phrase
+
+Địa chỉ=00007FFC138F02A0
+Ordinal=303
+Symbol=intent_trigger_handle_is_valid
+
+Địa chỉ=00007FFC138F0640
+Ordinal=304
+Symbol=intent_trigger_handle_release
+
+Địa chỉ=00007FFC138F1030
+Ordinal=305
+Symbol=keyword_recognition_model_add_user_defined_wake_word
+
+Địa chỉ=00007FFC138F0B50
+Ordinal=306
+Symbol=keyword_recognition_model_create_from_config
+
+Địa chỉ=00007FFC138F09B0
+Ordinal=307
+Symbol=keyword_recognition_model_create_from_file
+
+Địa chỉ=00007FFC138F0990
+Ordinal=308
+Symbol=keyword_recognition_model_handle_is_valid
+
+Địa chỉ=00007FFC138F09A0
+Ordinal=309
+Symbol=keyword_recognition_model_handle_release
+
+Địa chỉ=00007FFC138F1C50
+Ordinal=310
+Symbol=language_understanding_model__handle_release
+
+Địa chỉ=00007FFC138F18D0
+Ordinal=311
+Symbol=language_understanding_model_create_from_app_id
+
+Địa chỉ=00007FFC138F1A70
+Ordinal=312
+Symbol=language_understanding_model_create_from_subscription
+
+Địa chỉ=00007FFC138F1730
+Ordinal=313
+Symbol=language_understanding_model_create_from_uri
+
+Địa chỉ=00007FFC138F1C60
+Ordinal=314
+Symbol=language_understanding_model_get_model_id
+
+Địa chỉ=00007FFC138F1720
+Ordinal=315
+Symbol=language_understanding_model_handle_is_valid
+
+Địa chỉ=00007FFC138E73C0
+Ordinal=316
+Symbol=meeting_create_from_config
+
+Địa chỉ=00007FFC138DC910
+Ordinal=317
+Symbol=meeting_delete_meeting
+
+Địa chỉ=00007FFC138DC7A0
+Ordinal=318
+Symbol=meeting_end_meeting
+
+Địa chỉ=00007FFC138DC630
+Ordinal=319
+Symbol=meeting_get_meeting_id
+
+Địa chỉ=00007FFC138DC850
+Ordinal=320
+Symbol=meeting_get_property_bag
+
+Địa chỉ=00007FFC138DC9C0
+Ordinal=321
+Symbol=meeting_lock_meeting
+
+Địa chỉ=00007FFC138DCB20
+Ordinal=322
+Symbol=meeting_mute_all_participants
+
+Địa chỉ=00007FFC138DCCA0
+Ordinal=323
+Symbol=meeting_mute_participant
+
+Địa chỉ=00007FFC138DCEC0
+Ordinal=324
+Symbol=meeting_release_handle
+
+Địa chỉ=00007FFC138DC860
+Ordinal=325
+Symbol=meeting_start_meeting
+
+Địa chỉ=00007FFC138DD150
+Ordinal=326
+Symbol=meeting_transcription_result_get_user_id
+
+Địa chỉ=00007FFC138DD2D0
+Ordinal=327
+Symbol=meeting_transcription_result_get_utterance_id
+
+Địa chỉ=00007FFC138DCA70
+Ordinal=328
+Symbol=meeting_unlock_meeting
+
+Địa chỉ=00007FFC138DCBE0
+Ordinal=329
+Symbol=meeting_unmute_all_participants
+
+Địa chỉ=00007FFC138DCDB0
+Ordinal=330
+Symbol=meeting_unmute_participant
+
+Địa chỉ=00007FFC138DC410
+Ordinal=331
+Symbol=meeting_update_participant
+
+Địa chỉ=00007FFC138DC2B0
+Ordinal=332
+Symbol=meeting_update_participant_by_user
+
+Địa chỉ=00007FFC138DC190
+Ordinal=333
+Symbol=meeting_update_participant_by_user_id
+
+Địa chỉ=00007FFC13A13710
+Ordinal=334
+Symbol=pal_get_value
+
+Địa chỉ=00007FFC13908510
+Ordinal=335
+Symbol=pal_string_to_wstring
+
+Địa chỉ=00007FFC13908500
+Ordinal=336
+Symbol=pal_wstring_to_string
+
+Địa chỉ=00007FFC138F1FF0
+Ordinal=337
+Symbol=participant_create_handle
+
+Địa chỉ=00007FFC138F24A0
+Ordinal=338
+Symbol=participant_get_property_bag
+
+Địa chỉ=00007FFC138F2260
+Ordinal=339
+Symbol=participant_release_handle
+
+Địa chỉ=00007FFC138F2270
+Ordinal=340
+Symbol=participant_set_preferred_langugage
+
+Địa chỉ=00007FFC138F2390
+Ordinal=341
+Symbol=participant_set_voice_signature
+
+Địa chỉ=00007FFC138F2AF0
+Ordinal=342
+Symbol=pattern_matching_model_add_entity
+
+Địa chỉ=00007FFC138F2E90
+Ordinal=343
+Symbol=pattern_matching_model_add_intent
+
+Địa chỉ=00007FFC138F2990
+Ordinal=344
+Symbol=pattern_matching_model_create
+
+Địa chỉ=00007FFC138F28D0
+Ordinal=345
+Symbol=pattern_matching_model_create_from_id
+
+Địa chỉ=00007FFC138F1720
+Ordinal=346
+Symbol=pattern_matching_model_handle_is_valid
+
+Địa chỉ=00007FFC138EB110
+Ordinal=347
+Symbol=phrase_list_grammar_add_phrase
+
+Địa chỉ=00007FFC138EB130
+Ordinal=348
+Symbol=phrase_list_grammar_clear
+
+Địa chỉ=00007FFC138EB0E0
+Ordinal=349
+Symbol=phrase_list_grammar_from_recognizer_by_name
+
+Địa chỉ=00007FFC138F3830
+Ordinal=350
+Symbol=pronunciation_assessment_config_apply_to_recognizer
+
+Địa chỉ=00007FFC138F3670
+Ordinal=351
+Symbol=pronunciation_assessment_config_get_property_bag
+
+Địa chỉ=00007FFC138F3650
+Ordinal=352
+Symbol=pronunciation_assessment_config_is_handle_valid
+
+Địa chỉ=00007FFC138F3660
+Ordinal=353
+Symbol=pronunciation_assessment_config_release
+
+Địa chỉ=00007FFC138F36E0
+Ordinal=354
+Symbol=pronunciation_assessment_config_to_json
+
+Địa chỉ=00007FFC139081D0
+Ordinal=355
+Symbol=property_bag_copy
+
+Địa chỉ=00007FFC13907D20
+Ordinal=356
+Symbol=property_bag_create
+
+Địa chỉ=00007FFC13904F60
+Ordinal=357
+Symbol=property_bag_free_string
+
+Địa chỉ=00007FFC13907EE0
+Ordinal=358
+Symbol=property_bag_get_string
+
+Địa chỉ=00007FFC13907EC0
+Ordinal=359
+Symbol=property_bag_is_valid
+
+Địa chỉ=00007FFC13907ED0
+Ordinal=360
+Symbol=property_bag_release
+
+Địa chỉ=00007FFC13908050
+Ordinal=361
+Symbol=property_bag_set_string
+
+Địa chỉ=00007FFC138CDA80
+Ordinal=362
+Symbol=pull_audio_input_stream_set_callbacks
+
+Địa chỉ=00007FFC138CDC20
+Ordinal=363
+Symbol=pull_audio_input_stream_set_getproperty_callback
+
+Địa chỉ=00007FFC138CDF80
+Ordinal=364
+Symbol=pull_audio_output_stream_read
+
+Địa chỉ=00007FFC138CDE90
+Ordinal=365
+Symbol=push_audio_input_stream_close
+
+Địa chỉ=00007FFC138CF0B0
+Ordinal=366
+Symbol=push_audio_input_stream_set_property_by_id
+
+Địa chỉ=00007FFC138CF1F0
+Ordinal=367
+Symbol=push_audio_input_stream_set_property_by_name
+
+Địa chỉ=00007FFC138CDD80
+Ordinal=368
+Symbol=push_audio_input_stream_write
+
+Địa chỉ=00007FFC138CE0C0
+Ordinal=369
+Symbol=push_audio_output_stream_set_callbacks
+
+Địa chỉ=00007FFC138DEBD0
+Ordinal=370
+Symbol=recognizer_async_handle_is_valid
+
+Địa chỉ=00007FFC138F3FE0
+Ordinal=371
+Symbol=recognizer_async_handle_release
+
+Địa chỉ=00007FFC138F4A50
+Ordinal=372
+Symbol=recognizer_canceled_set_callback
+
+Địa chỉ=00007FFC138F4D60
+Ordinal=373
+Symbol=recognizer_connection_event_get_property_bag
+
+Địa chỉ=00007FFC138E7880
+Ordinal=374
+Symbol=recognizer_create_conversation_transcriber_from_auto_detect_source_lang_config
+
+Địa chỉ=00007FFC138E7600
+Ordinal=375
+Symbol=recognizer_create_conversation_transcriber_from_config
+
+Địa chỉ=00007FFC138E7B10
+Ordinal=376
+Symbol=recognizer_create_conversation_transcriber_from_source_lang_config
+
+Địa chỉ=00007FFC138E6270
+Ordinal=377
+Symbol=recognizer_create_intent_recognizer_from_config
+
+Địa chỉ=00007FFC138E6490
+Ordinal=378
+Symbol=recognizer_create_keyword_recognizer_from_audio_config
+
+Địa chỉ=00007FFC138E8610
+Ordinal=379
+Symbol=recognizer_create_meeting_transcriber_from_config
+
+Địa chỉ=00007FFC138E48C0
+Ordinal=380
+Symbol=recognizer_create_source_language_recognizer_from_auto_detect_source_lang_config
+
+Địa chỉ=00007FFC138E9820
+Ordinal=381
+Symbol=recognizer_create_speaker_recognizer_from_config
+
+Địa chỉ=00007FFC138E4240
+Ordinal=382
+Symbol=recognizer_create_speech_recognizer_from_auto_detect_source_lang_config
+
+Địa chỉ=00007FFC138E3890
+Ordinal=383
+Symbol=recognizer_create_speech_recognizer_from_config
+
+Địa chỉ=00007FFC138E4580
+Ordinal=384
+Symbol=recognizer_create_speech_recognizer_from_source_lang_config
+
+Địa chỉ=00007FFC138E5C60
+Ordinal=385
+Symbol=recognizer_create_translation_recognizer_from_auto_detect_source_lang_config
+
+Địa chỉ=00007FFC138E5820
+Ordinal=386
+Symbol=recognizer_create_translation_recognizer_from_config
+
+Địa chỉ=00007FFC138F4030
+Ordinal=387
+Symbol=recognizer_event_handle_is_valid
+
+Địa chỉ=00007FFC138F4070
+Ordinal=388
+Symbol=recognizer_event_handle_release
+
+Địa chỉ=00007FFC138F4FD0
+Ordinal=389
+Symbol=recognizer_get_property_bag
+
+Địa chỉ=00007FFC138F3EC0
+Ordinal=390
+Symbol=recognizer_handle_is_valid
+
+Địa chỉ=00007FFC138F3ED0
+Ordinal=391
+Symbol=recognizer_handle_release
+
+Địa chỉ=00007FFC138E7DA0
+Ordinal=392
+Symbol=recognizer_join_conversation
+
+Địa chỉ=00007FFC138E89D0
+Ordinal=393
+Symbol=recognizer_join_meeting
+
+Địa chỉ=00007FFC138E8430
+Ordinal=394
+Symbol=recognizer_leave_conversation
+
+Địa chỉ=00007FFC138E9060
+Ordinal=395
+Symbol=recognizer_leave_meeting
+
+Địa chỉ=00007FFC138F4DB0
+Ordinal=396
+Symbol=recognizer_recognition_event_get_offset
+
+Địa chỉ=00007FFC138F4EA0
+Ordinal=397
+Symbol=recognizer_recognition_event_get_result
+
+Địa chỉ=00007FFC138F46F0
+Ordinal=398
+Symbol=recognizer_recognize_keyword_once
+
+Địa chỉ=00007FFC138F4710
+Ordinal=399
+Symbol=recognizer_recognize_keyword_once_async
+
+Địa chỉ=00007FFC138DF710
+Ordinal=400
+Symbol=recognizer_recognize_keyword_once_async_wait_for
+
+Địa chỉ=00007FFC138F40B0
+Ordinal=401
+Symbol=recognizer_recognize_once
+
+Địa chỉ=00007FFC138F40D0
+Ordinal=402
+Symbol=recognizer_recognize_once_async
+
+Địa chỉ=00007FFC138DF710
+Ordinal=403
+Symbol=recognizer_recognize_once_async_wait_for
+
+Địa chỉ=00007FFC138F41F0
+Ordinal=404
+Symbol=recognizer_recognize_text_once_async
+
+Địa chỉ=00007FFC138F4A30
+Ordinal=405
+Symbol=recognizer_recognized_set_callback
+
+Địa chỉ=00007FFC138F4A10
+Ordinal=406
+Symbol=recognizer_recognizing_set_callback
+
+Địa chỉ=00007FFC138F4010
+Ordinal=407
+Symbol=recognizer_result_handle_is_valid
+
+Địa chỉ=00007FFC138F4020
+Ordinal=408
+Symbol=recognizer_result_handle_release
+
+Địa chỉ=00007FFC138F4A70
+Ordinal=409
+Symbol=recognizer_session_event_get_session_id
+
+Địa chỉ=00007FFC138F4990
+Ordinal=410
+Symbol=recognizer_session_started_set_callback
+
+Địa chỉ=00007FFC138F49B0
+Ordinal=411
+Symbol=recognizer_session_stopped_set_callback
+
+Địa chỉ=00007FFC138F49F0
+Ordinal=412
+Symbol=recognizer_speech_end_detected_set_callback
+
+Địa chỉ=00007FFC138F49D0
+Ordinal=413
+Symbol=recognizer_speech_start_detected_set_callback
+
+Địa chỉ=00007FFC138F4340
+Ordinal=414
+Symbol=recognizer_start_continuous_recognition
+
+Địa chỉ=00007FFC138F4360
+Ordinal=415
+Symbol=recognizer_start_continuous_recognition_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=416
+Symbol=recognizer_start_continuous_recognition_async_wait_for
+
+Địa chỉ=00007FFC138F4580
+Ordinal=417
+Symbol=recognizer_start_keyword_recognition
+
+Địa chỉ=00007FFC138F45B0
+Ordinal=418
+Symbol=recognizer_start_keyword_recognition_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=419
+Symbol=recognizer_start_keyword_recognition_async_wait_for
+
+Địa chỉ=00007FFC138F4460
+Ordinal=420
+Symbol=recognizer_stop_continuous_recognition
+
+Địa chỉ=00007FFC138F4480
+Ordinal=421
+Symbol=recognizer_stop_continuous_recognition_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=422
+Symbol=recognizer_stop_continuous_recognition_async_wait_for
+
+Địa chỉ=00007FFC138F4870
+Ordinal=423
+Symbol=recognizer_stop_keyword_recognition
+
+Địa chỉ=00007FFC138F4890
+Ordinal=424
+Symbol=recognizer_stop_keyword_recognition_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=425
+Symbol=recognizer_stop_keyword_recognition_async_wait_for
+
+Địa chỉ=00007FFC138F9530
+Ordinal=426
+Symbol=reset_voice_profile
+
+Địa chỉ=00007FFC138F5FE0
+Ordinal=427
+Symbol=result_get_canceled_error_code
+
+Địa chỉ=00007FFC138F6440
+Ordinal=428
+Symbol=result_get_duration
+
+Địa chỉ=00007FFC138F6130
+Ordinal=429
+Symbol=result_get_no_match_reason
+
+Địa chỉ=00007FFC138F6350
+Ordinal=430
+Symbol=result_get_offset
+
+Địa chỉ=00007FFC138F6530
+Ordinal=431
+Symbol=result_get_property_bag
+
+Địa chỉ=00007FFC138F5E20
+Ordinal=432
+Symbol=result_get_reason
+
+Địa chỉ=00007FFC138F5F00
+Ordinal=433
+Symbol=result_get_reason_canceled
+
+Địa chỉ=00007FFC138F5CE0
+Ordinal=434
+Symbol=result_get_result_id
+
+Địa chỉ=00007FFC138F6210
+Ordinal=435
+Symbol=result_get_text
+
+Địa chỉ=00007FFC138F9910
+Ordinal=436
+Symbol=retrieve_enrollment_result
+
+Địa chỉ=00007FFC138F7E40
+Ordinal=437
+Symbol=session_from_recognizer
+
+Địa chỉ=00007FFC138F7FE0
+Ordinal=438
+Symbol=session_get_property_bag
+
+Địa chỉ=00007FFC138F7FC0
+Ordinal=439
+Symbol=session_handle_is_valid
+
+Địa chỉ=00007FFC138F7FD0
+Ordinal=440
+Symbol=session_handle_release
+
+Địa chỉ=00007FFC138F8320
+Ordinal=441
+Symbol=source_lang_config_from_language
+
+Địa chỉ=00007FFC138F8470
+Ordinal=442
+Symbol=source_lang_config_from_language_and_endpointId
+
+Địa chỉ=00007FFC138F8600
+Ordinal=443
+Symbol=source_lang_config_get_property_bag
+
+Địa chỉ=00007FFC138F85E0
+Ordinal=444
+Symbol=source_lang_config_is_handle_valid
+
+Địa chỉ=00007FFC138F85F0
+Ordinal=445
+Symbol=source_lang_config_release
+
+Địa chỉ=00007FFC138F9D30
+Ordinal=446
+Symbol=speaker_identification_model_add_profile
+
+Địa chỉ=00007FFC138F9C20
+Ordinal=447
+Symbol=speaker_identification_model_create
+
+Địa chỉ=00007FFC138F9E20
+Ordinal=448
+Symbol=speaker_identification_model_release_handle
+
+Địa chỉ=00007FFC138F9370
+Ordinal=449
+Symbol=speaker_recognizer_get_property_bag
+
+Địa chỉ=00007FFC138FA000
+Ordinal=450
+Symbol=speaker_recognizer_identify
+
+Địa chỉ=00007FFC138F8AB0
+Ordinal=451
+Symbol=speaker_recognizer_release_handle
+
+Địa chỉ=00007FFC138FA190
+Ordinal=452
+Symbol=speaker_recognizer_verify
+
+Địa chỉ=00007FFC138F9E60
+Ordinal=453
+Symbol=speaker_verification_model_create
+
+Địa chỉ=00007FFC138F9FC0
+Ordinal=454
+Symbol=speaker_verification_model_release_handle
+
+Địa chỉ=00007FFC138FBB40
+Ordinal=455
+Symbol=speech_config_from_authorization_token
+
+Địa chỉ=00007FFC138FB710
+Ordinal=456
+Symbol=speech_config_from_authorization_token_internal
+
+Địa chỉ=00007FFC138FBB50
+Ordinal=457
+Symbol=speech_config_from_endpoint
+
+Địa chỉ=00007FFC138FB880
+Ordinal=458
+Symbol=speech_config_from_endpoint_internal
+
+Địa chỉ=00007FFC138FBB60
+Ordinal=459
+Symbol=speech_config_from_host
+
+Địa chỉ=00007FFC138FB9D0
+Ordinal=460
+Symbol=speech_config_from_host_internal
+
+Địa chỉ=00007FFC138FBB30
+Ordinal=461
+Symbol=speech_config_from_subscription
+
+Địa chỉ=00007FFC138FB5A0
+Ordinal=462
+Symbol=speech_config_from_subscription_internal
+
+Địa chỉ=00007FFC138FBB80
+Ordinal=463
+Symbol=speech_config_get_property_bag
+
+Địa chỉ=00007FFC138FBB20
+Ordinal=464
+Symbol=speech_config_is_handle_valid
+
+Địa chỉ=00007FFC138FBB70
+Ordinal=465
+Symbol=speech_config_release
+
+Địa chỉ=00007FFC138FBB90
+Ordinal=466
+Symbol=speech_config_set_audio_output_format
+
+Địa chỉ=00007FFC138FBE40
+Ordinal=467
+Symbol=speech_config_set_profanity
+
+Địa chỉ=00007FFC138FBCC0
+Ordinal=468
+Symbol=speech_config_set_service_property
+
+Địa chỉ=00007FFC138FC160
+Ordinal=469
+Symbol=speech_recognition_model_get_locales
+
+Địa chỉ=00007FFC138FC130
+Ordinal=470
+Symbol=speech_recognition_model_get_name
+
+Địa chỉ=00007FFC138FC250
+Ordinal=471
+Symbol=speech_recognition_model_get_path
+
+Địa chỉ=00007FFC138FC280
+Ordinal=472
+Symbol=speech_recognition_model_get_version
+
+Địa chỉ=00007FFC138FC2B0
+Ordinal=473
+Symbol=speech_recognition_model_handle_release
+
+Địa chỉ=00007FFC138FCFA0
+Ordinal=474
+Symbol=speech_synthesis_request_create
+
+Địa chỉ=00007FFC138FD480
+Ordinal=475
+Symbol=speech_synthesis_request_finish
+
+Địa chỉ=00007FFC138FD5A0
+Ordinal=476
+Symbol=speech_synthesis_request_get_property_bag
+
+Địa chỉ=00007FFC138FD530
+Ordinal=477
+Symbol=speech_synthesis_request_handle_is_valid
+
+Địa chỉ=00007FFC138FD550
+Ordinal=478
+Symbol=speech_synthesis_request_release
+
+Địa chỉ=00007FFC138FD370
+Ordinal=479
+Symbol=speech_synthesis_request_send_text_piece
+
+Địa chỉ=00007FFC138FD1B0
+Ordinal=480
+Symbol=speech_synthesis_request_set_voice
+
+Địa chỉ=00007FFC138FC550
+Ordinal=481
+Symbol=speech_translation_config_add_target_language
+
+Địa chỉ=00007FFC138FC520
+Ordinal=482
+Symbol=speech_translation_config_from_authorization_token
+
+Địa chỉ=00007FFC138FC530
+Ordinal=483
+Symbol=speech_translation_config_from_endpoint
+
+Địa chỉ=00007FFC138FC540
+Ordinal=484
+Symbol=speech_translation_config_from_host
+
+Địa chỉ=00007FFC138FC510
+Ordinal=485
+Symbol=speech_translation_config_from_subscription
+
+Địa chỉ=00007FFC138FC8A0
+Ordinal=486
+Symbol=speech_translation_config_remove_target_language
+
+Địa chỉ=00007FFC138FC6F0
+Ordinal=487
+Symbol=speech_translation_config_set_custom_model_category_id
+
+Địa chỉ=00007FFC138FCB50
+Ordinal=488
+Symbol=speech_translation_model_get_name
+
+Địa chỉ=00007FFC138FCD60
+Ordinal=489
+Symbol=speech_translation_model_get_path
+
+Địa chỉ=00007FFC138FCB80
+Ordinal=490
+Symbol=speech_translation_model_get_source_languages
+
+Địa chỉ=00007FFC138FCC70
+Ordinal=491
+Symbol=speech_translation_model_get_target_languages
+
+Địa chỉ=00007FFC138FCD90
+Ordinal=492
+Symbol=speech_translation_model_get_version
+
+Địa chỉ=00007FFC138FCDC0
+Ordinal=493
+Symbol=speech_translation_model_handle_release
+
+Địa chỉ=00007FFC138DEBC0
+Ordinal=494
+Symbol=speechapi_async_handle_release
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=495
+Symbol=speechapi_async_wait_for
+
+Địa chỉ=00007FFC138F6AD0
+Ordinal=496
+Symbol=synth_result_get_audio_data
+
+Địa chỉ=00007FFC138F6C30
+Ordinal=497
+Symbol=synth_result_get_audio_format
+
+Địa chỉ=00007FFC138F69B0
+Ordinal=498
+Symbol=synth_result_get_audio_length_duration
+
+Địa chỉ=00007FFC138F6850
+Ordinal=499
+Symbol=synth_result_get_canceled_error_code
+
+Địa chỉ=00007FFC138F6D50
+Ordinal=500
+Symbol=synth_result_get_property_bag
+
+Địa chỉ=00007FFC138F6690
+Ordinal=501
+Symbol=synth_result_get_reason
+
+Địa chỉ=00007FFC138F6770
+Ordinal=502
+Symbol=synth_result_get_reason_canceled
+
+Địa chỉ=00007FFC138F6540
+Ordinal=503
+Symbol=synth_result_get_result_id
+
+Địa chỉ=00007FFC138F7250
+Ordinal=504
+Symbol=synthesis_voices_result_get_property_bag
+
+Địa chỉ=00007FFC138F6EB0
+Ordinal=505
+Symbol=synthesis_voices_result_get_reason
+
+Địa chỉ=00007FFC138F6D60
+Ordinal=506
+Symbol=synthesis_voices_result_get_result_id
+
+Địa chỉ=00007FFC138F70A0
+Ordinal=507
+Symbol=synthesis_voices_result_get_voice_info
+
+Địa chỉ=00007FFC138F6F90
+Ordinal=508
+Symbol=synthesis_voices_result_get_voice_num
+
+Địa chỉ=00007FFC138FD9E0
+Ordinal=509
+Symbol=synthesizer_async_handle_is_valid
+
+Địa chỉ=00007FFC138FD9F0
+Ordinal=510
+Symbol=synthesizer_async_handle_release
+
+Địa chỉ=00007FFC138FFBB0
+Ordinal=511
+Symbol=synthesizer_bookmark_event_get_values
+
+Địa chỉ=00007FFC138FF410
+Ordinal=512
+Symbol=synthesizer_bookmark_reached_set_callback
+
+Địa chỉ=00007FFC138FF3B0
+Ordinal=513
+Symbol=synthesizer_canceled_set_callback
+
+Địa chỉ=00007FFC138FF390
+Ordinal=514
+Symbol=synthesizer_completed_set_callback
+
+Địa chỉ=00007FFC138FF6D0
+Ordinal=515
+Symbol=synthesizer_connection_connected_set_callback
+
+Địa chỉ=00007FFC138FF6F0
+Ordinal=516
+Symbol=synthesizer_connection_disconnected_set_callback
+
+Địa chỉ=00007FFC138E6DB0
+Ordinal=517
+Symbol=synthesizer_create_speech_synthesizer_from_auto_detect_source_lang_config
+
+Địa chỉ=00007FFC138E6700
+Ordinal=518
+Symbol=synthesizer_create_speech_synthesizer_from_config
+
+Địa chỉ=00007FFC138FFCB0
+Ordinal=519
+Symbol=synthesizer_event_get_result_id
+
+Địa chỉ=00007FFC138FFE70
+Ordinal=520
+Symbol=synthesizer_event_get_text
+
+Địa chỉ=00007FFC138FDA70
+Ordinal=521
+Symbol=synthesizer_event_handle_is_valid
+
+Địa chỉ=00007FFC138FDAB0
+Ordinal=522
+Symbol=synthesizer_event_handle_release
+
+Địa chỉ=00007FFC138FDB20
+Ordinal=523
+Symbol=synthesizer_get_property_bag
+
+Địa chỉ=00007FFC138FF170
+Ordinal=524
+Symbol=synthesizer_get_voices_list
+
+Địa chỉ=00007FFC138FF190
+Ordinal=525
+Symbol=synthesizer_get_voices_list_async
+
+Địa chỉ=00007FFC138FF340
+Ordinal=526
+Symbol=synthesizer_get_voices_list_async_wait_for
+
+Địa chỉ=00007FFC138FD910
+Ordinal=527
+Symbol=synthesizer_handle_is_valid
+
+Địa chỉ=00007FFC138FD920
+Ordinal=528
+Symbol=synthesizer_handle_release
+
+Địa chỉ=00007FFC138FDA30
+Ordinal=529
+Symbol=synthesizer_result_handle_is_valid
+
+Địa chỉ=00007FFC138FDA40
+Ordinal=530
+Symbol=synthesizer_result_handle_release
+
+Địa chỉ=00007FFC138FEF10
+Ordinal=531
+Symbol=synthesizer_speak_async_wait_for
+
+Địa chỉ=00007FFC138FDEF0
+Ordinal=532
+Symbol=synthesizer_speak_request
+
+Địa chỉ=00007FFC138FE460
+Ordinal=533
+Symbol=synthesizer_speak_request_async
+
+Địa chỉ=00007FFC138FDD40
+Ordinal=534
+Symbol=synthesizer_speak_ssml
+
+Địa chỉ=00007FFC138FE280
+Ordinal=535
+Symbol=synthesizer_speak_ssml_async
+
+Địa chỉ=00007FFC138FDB90
+Ordinal=536
+Symbol=synthesizer_speak_text
+
+Địa chỉ=00007FFC138FE0A0
+Ordinal=537
+Symbol=synthesizer_speak_text_async
+
+Địa chỉ=00007FFC138FE9A0
+Ordinal=538
+Symbol=synthesizer_start_speaking_request
+
+Địa chỉ=00007FFC138FE7F0
+Ordinal=539
+Symbol=synthesizer_start_speaking_ssml
+
+Địa chỉ=00007FFC138FED30
+Ordinal=540
+Symbol=synthesizer_start_speaking_ssml_async
+
+Địa chỉ=00007FFC138FE640
+Ordinal=541
+Symbol=synthesizer_start_speaking_text
+
+Địa chỉ=00007FFC138FEB50
+Ordinal=542
+Symbol=synthesizer_start_speaking_text_async
+
+Địa chỉ=00007FFC138FF350
+Ordinal=543
+Symbol=synthesizer_started_set_callback
+
+Địa chỉ=00007FFC138FEF20
+Ordinal=544
+Symbol=synthesizer_stop_speaking
+
+Địa chỉ=00007FFC138FEFF0
+Ordinal=545
+Symbol=synthesizer_stop_speaking_async
+
+Địa chỉ=00007FFC138DEDE0
+Ordinal=546
+Symbol=synthesizer_stop_speaking_async_wait_for
+
+Địa chỉ=00007FFC138FF710
+Ordinal=547
+Symbol=synthesizer_synthesis_event_get_result
+
+Địa chỉ=00007FFC138FF370
+Ordinal=548
+Symbol=synthesizer_synthesizing_set_callback
+
+Địa chỉ=00007FFC138FFB80
+Ordinal=549
+Symbol=synthesizer_viseme_event_get_animation
+
+Địa chỉ=00007FFC138FFA50
+Ordinal=550
+Symbol=synthesizer_viseme_event_get_values
+
+Địa chỉ=00007FFC138FF3F0
+Ordinal=551
+Symbol=synthesizer_viseme_received_set_callback
+
+Địa chỉ=00007FFC138FF850
+Ordinal=552
+Symbol=synthesizer_word_boundary_event_get_values
+
+Địa chỉ=00007FFC138FF3D0
+Ordinal=553
+Symbol=synthesizer_word_boundary_set_callback
+
+Địa chỉ=00007FFC13902B30
+Ordinal=554
+Symbol=translation_synthesis_result_get_audio_data
+
+Địa chỉ=00007FFC139028A0
+Ordinal=555
+Symbol=translation_text_result_get_translation
+
+Địa chỉ=00007FFC139027B0
+Ordinal=556
+Symbol=translation_text_result_get_translation_count
+
+Địa chỉ=00007FFC13902360
+Ordinal=557
+Symbol=translator_add_target_language
+
+Địa chỉ=00007FFC13902500
+Ordinal=558
+Symbol=translator_remove_target_language
+
+Địa chỉ=00007FFC13902340
+Ordinal=559
+Symbol=translator_synthesizing_audio_set_callback
+
+Địa chỉ=00007FFC13903000
+Ordinal=560
+Symbol=user_create_from_id
+
+Địa chỉ=00007FFC13903160
+Ordinal=561
+Symbol=user_get_id
+
+Địa chỉ=00007FFC13903150
+Ordinal=562
+Symbol=user_release_handle
+
+Địa chỉ=00007FFC138F7300
+Ordinal=563
+Symbol=voice_info_get_local_name
+
+Địa chỉ=00007FFC138F72A0
+Ordinal=564
+Symbol=voice_info_get_locale
+
+Địa chỉ=00007FFC138F7270
+Ordinal=565
+Symbol=voice_info_get_name
+
+Địa chỉ=00007FFC138F7550
+Ordinal=566
+Symbol=voice_info_get_property_bag
+
+Địa chỉ=00007FFC138F72D0
+Ordinal=567
+Symbol=voice_info_get_short_name
+
+Địa chỉ=00007FFC138F7330
+Ordinal=568
+Symbol=voice_info_get_style_list
+
+Địa chỉ=00007FFC138F7440
+Ordinal=569
+Symbol=voice_info_get_voice_path
+
+Địa chỉ=00007FFC138F7470
+Ordinal=570
+Symbol=voice_info_get_voice_type
+
+Địa chỉ=00007FFC138F7260
+Ordinal=571
+Symbol=voice_info_handle_release
+
+Địa chỉ=00007FFC138F9370
+Ordinal=572
+Symbol=voice_profile_client_get_property_bag
+
+Địa chỉ=00007FFC138F8AB0
+Ordinal=573
+Symbol=voice_profile_client_release_handle
+
+Địa chỉ=00007FFC138F8CF0
+Ordinal=574
+Symbol=voice_profile_get_id
+
+Địa chỉ=00007FFC138F9C10
+Ordinal=575
+Symbol=voice_profile_get_property_bag
+
+Địa chỉ=00007FFC138F8B30
+Ordinal=576
+Symbol=voice_profile_get_type
+
+Địa chỉ=00007FFC138F8AF0
+Ordinal=577
+Symbol=voice_profile_release_handle
+
