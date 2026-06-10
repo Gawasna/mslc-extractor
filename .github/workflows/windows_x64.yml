@@ -54,7 +54,7 @@ jobs:
           $zipName = "mslc-extractor-$tag-win-x64.zip"
           $zipPath = Join-Path $out $zipName
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          Compress-Archive -Path "$out\Loader.exe", "$out\HookCore.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
+          Compress-Archive -Path "$out\Host.exe", "$out\Agent.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
           echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
           echo "ZIP_PATH=$zipPath" >> $env:GITHUB_ENV
           Write-Host "Created artifact: $zipName"
