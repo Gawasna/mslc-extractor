@@ -147,21 +147,46 @@ wchar_t    g_lastTs[20]  = L"--:--:--";
 
 static size_t     g_lastLiveWidth = 0;
 
+std::string WideToUTF8(const std::wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string strTo(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    return strTo;
+}
+
 void PrintLiveText(const std::wstring& text) {
-    std::wstring line = L"\r[LIVE] [~] " + text;
+    int consoleWidth = 80;
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+        consoleWidth = csbi.dwSize.X;
+    }
+    if (consoleWidth <= 0) consoleWidth = 80;
+
+    std::wstring prefix = L"\r[LIVE] [~] ";
+    std::wstring displayOpts = text;
+
+    if (prefix.size() + displayOpts.size() >= static_cast<size_t>(consoleWidth)) {
+        size_t maxTextLen = consoleWidth - prefix.size() - 4;
+        if (displayOpts.size() > maxTextLen) {
+            displayOpts = L"..." + displayOpts.substr(displayOpts.size() - maxTextLen);
+        }
+    }
+
+    std::wstring line = prefix + displayOpts;
     if (line.size() < g_lastLiveWidth) {
         line += std::wstring(g_lastLiveWidth - line.size(), L' ');
     }
     g_lastLiveWidth = line.size();
-    std::wcout << line;
-    std::wcout.flush();
+    std::cout << WideToUTF8(line);
+    std::cout.flush();
 }
 
 void ClearLiveText() {
     if (g_lastLiveWidth > 0) {
         std::wstring clearLine(g_lastLiveWidth, L' ');
-        std::wcout << L"\r" << clearLine << L"\r";
-        std::wcout.flush();
+        std::cout << "\r" << WideToUTF8(clearLine) << "\r";
+        std::cout.flush();
         g_lastLiveWidth = 0;
     }
 }
@@ -238,11 +263,11 @@ void EmitTranslateCommit(const std::wstring& type, const std::wstring& text, uin
     
     ClearLiveText();
     
-    std::wcout << L"[TRANSLATE_COMMIT] [" << type << L"] " << g_transSegmenter.segment_id << L". " << text
-               << L" (offset: " << std::fixed << std::setprecision(2) << offset_sec << L"s"
-               << L", duration: " << duration_sec << L"s"
-               << L", ts: " << ts_ms << L")"
-               << std::endl;
+    std::cout << "[TRANSLATE_COMMIT] [" << WideToUTF8(type) << "] " << g_transSegmenter.segment_id << ". " << WideToUTF8(text)
+              << " (offset: " << std::fixed << std::setprecision(2) << offset_sec << "s"
+              << ", duration: " << duration_sec << "s"
+              << ", ts: " << ts_ms << ")"
+              << std::endl;
               
     std::string narrowText(text.begin(), text.end());
     std::string narrowType(type.begin(), type.end());
@@ -271,7 +296,7 @@ void PipeListener() {
     // Allow AppContainers (S-1-15-2-1) & Everyone (WD) generic Read/Write.
     // Local System (SY) & Administrators (BA) generic All.
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GRGW;;;S-1-15-2-1)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)", 
+            L"D:(A;;GRGW;;;S-1-15-2-1)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)S:(ML;;NW;;;LW)", 
             SDDL_REVISION_1, 
             &pSD, 
             NULL)) {
@@ -609,7 +634,7 @@ int main(int argc, char* argv[]) {
 
     // 3. UI setup (skipped in --stdout or --inject-only mode)
     if (!g_stdoutOnly && !g_injectOnly) {
-        _setmode(_fileno(stdout), _O_U16TEXT);
+        SetConsoleOutputCP(CP_UTF8);
     }
 
     // 4. Start Named Pipe Server (Keep joinable for graceful shutdown)
@@ -626,7 +651,7 @@ int main(int argc, char* argv[]) {
         // Discovery & Injection (skipped in Mock Mode)
         if (!g_mockMode) {
             if (!g_stdoutOnly && !g_injectOnly) {
-                std::wcout << L"[*] Waiting for LiveCaptions.exe..." << std::endl;
+                std::cout << "[*] Waiting for LiveCaptions.exe..." << std::endl;
             }
 
             wchar_t exePath[MAX_PATH] = {};
@@ -645,12 +670,12 @@ int main(int argc, char* argv[]) {
 
                 if (pid != 0) {
                     if (!g_stdoutOnly && !g_injectOnly) {
-                        std::wcout << L"[+] LiveCaptions detected (PID: " << pid << L"). Injecting..." << std::endl;
+                        std::cout << "[+] LiveCaptions detected (PID: " << pid << "). Injecting..." << std::endl;
                     }
                     
                     if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
                         if (!g_stdoutOnly && !g_injectOnly) {
-                            std::wcout << L"[+] Agent.dll already injected. Listening..." << std::endl;
+                            std::cout << "[+] Agent.dll already injected. Listening..." << std::endl;
                         }
                         g_targetPid = pid;
                         break;
@@ -658,7 +683,7 @@ int main(int argc, char* argv[]) {
 
                     if (InjectDLL(pid, dllPath)) {
                         if (!g_stdoutOnly && !g_injectOnly) {
-                            std::wcout << L"[+] Agent.dll injected successfully. Listening..." << std::endl;
+                            std::cout << "[+] Agent.dll injected successfully. Listening..." << std::endl;
                         }
                         g_targetPid = pid;
                         break;
@@ -667,13 +692,13 @@ int main(int argc, char* argv[]) {
                         if (injectRetries >= 3) {
                             if (g_injectOnly) {
                                 if (!g_stdoutOnly) {
-                                    std::wcout << L"[-] Injection failed 3 times in inject-only mode. Aborting." << std::endl;
+                                    std::cout << "[-] Injection failed 3 times in inject-only mode. Aborting." << std::endl;
                                 }
                                 LogHost("INJECT", "Injection failed 3 times in inject-only mode. Aborting.");
                                 return 1; // Abort process on failure
                             } else {
                                 if (!g_stdoutOnly) {
-                                    std::wcout << L"[-] Injection failed 3 times. Resetting target and retrying discovery..." << std::endl;
+                                    std::cout << "[-] Injection failed 3 times. Resetting target and retrying discovery..." << std::endl;
                                 }
                                 LogHost("INJECT", "Injection failed 3 times. Resetting target PID to retry discovery.");
                                 pid = 0;
@@ -684,7 +709,7 @@ int main(int argc, char* argv[]) {
                             }
                         }
                         if (!g_stdoutOnly && !g_injectOnly) {
-                            std::wcout << L"[-] Injection failed. Retrying in 2s..." << std::endl;
+                            std::cout << "[-] Injection failed. Retrying in 2s..." << std::endl;
                         }
                         Sleep(2000);
                     }
@@ -709,7 +734,7 @@ int main(int argc, char* argv[]) {
             }
         } else {
             if (!g_stdoutOnly) {
-                std::wcout << L"[Mock Mode] Verification UI running..." << std::endl;
+                std::cout << "[Mock Mode] Verification UI running..." << std::endl;
             }
         }
 
@@ -751,7 +776,7 @@ int main(int argc, char* argv[]) {
                             LogHost("PIPE", "LiveCaptions.exe (PID: " + std::to_string(g_targetPid) + ") terminated while waiting for packets. Re-discovery initiated.");
                             if (!g_stdoutOnly) {
                                 ClearLiveText();
-                                std::wcout << L"[-] LiveCaptions.exe (PID: " << g_targetPid << L") terminated. Re-discovery initiated..." << std::endl;
+                                std::cout << "[-] LiveCaptions.exe (PID: " << g_targetPid << ") terminated. Re-discovery initiated..." << std::endl;
                             }
                             g_needReinjection = true;
                             break;
