@@ -126,6 +126,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Host.cpp" />
+    <ClCompile Include="Injector.cpp" />
+    <ClCompile Include="TextProcessor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Host.rc" />
@@ -133,6 +135,8 @@
   <ItemGroup>
     <Manifest Include="Host.manifest" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="Injector.h" />
+    <ClInclude Include="TextProcessor.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

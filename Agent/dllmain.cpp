@@ -288,7 +288,7 @@ static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_
          << ",\"offset\":"   << offset
          << ",\"duration\":" << duration
          << ",\"result_id\":\"" << result_id << "\""
-         << '}';
+         << "}\n";
     return json.str();
 }
 
@@ -396,9 +396,11 @@ int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint
 }
 
 // =============================================================
-// HOOK INSTALLATION THREAD (Safe environment outside Loader Lock)
+// HOOK INSTALLATION THREAD (Safe environment outside Windows Loader Lock)
 // =============================================================
 DWORD WINAPI HookThread(LPVOID lpParam) {
+    // Yield execution to allow DLL loading thread to complete DllMain and exit Windows Loader Lock
+    Sleep(100);
     HMODULE hCoreDLL = reinterpret_cast<HMODULE>(lpParam);
     
     if (hCoreDLL == nullptr) {
@@ -483,7 +485,7 @@ VOID NTAPI DllNotificationCallback(ULONG NotificationReason, PLDR_DLL_NOTIFICATI
             if (dllName.find(L"microsoft.cognitiveservices.speech.core.dll") != std::wstring::npos) {
                 if (!g_hookInstalled.exchange(true)) {
                     LogInfo("DllNotification: Target DLL loaded. Launching HookThread.");
-                    // Start hook thread outside of Loader Lock
+                    // Start hook thread outside of Windows Loader Lock
                     CreateThread(NULL, 0, HookThread, NotificationData->DllBase, 0, NULL);
                 }
             }
