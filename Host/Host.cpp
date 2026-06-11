@@ -3,7 +3,6 @@
 #include <string>
 #include <thread>
 #include <TlHelp32.h>
-#include <AclAPI.h>
 #include <sddl.h>
 #include <fcntl.h>
 #include <io.h>
@@ -20,6 +19,9 @@
 
 #include <shlobj.h>
 #pragma comment(lib, "shell32.lib")
+
+#include "Injector.h"
+#include "TextProcessor.h"
 
 // =============================================================
 // CONSTANTS & CLI GLOBALS
@@ -39,68 +41,8 @@ static bool g_mockMode = false;
 // Log file path determined dynamically
 static std::string g_logPath = "";
 
-// No layout constants required for standard logging B2B mode.
-
-// =============================================================
-// RAII WRAPPER FOR WINDOWS API HANDLES
-// =============================================================
-class SafeHandle {
-    HANDLE m_handle;
-public:
-    explicit SafeHandle(HANDLE h = INVALID_HANDLE_VALUE) : m_handle(h) {}
-    ~SafeHandle() { Close(); }
-
-    void Close() {
-        if (m_handle != INVALID_HANDLE_VALUE && m_handle != NULL) {
-            CloseHandle(m_handle);
-            m_handle = INVALID_HANDLE_VALUE;
-        }
-    }
-
-    HANDLE Get() const { return m_handle; }
-    void Set(HANDLE h) { Close(); m_handle = h; }
-    bool IsValid() const { return m_handle != INVALID_HANDLE_VALUE && m_handle != NULL; }
-    HANDLE* AddrOf() { return &m_handle; }
-
-    SafeHandle(const SafeHandle&) = delete;
-    SafeHandle& operator=(const SafeHandle&) = delete;
-    SafeHandle(SafeHandle&& other) noexcept : m_handle(other.m_handle) { other.m_handle = INVALID_HANDLE_VALUE; }
-    SafeHandle& operator=(SafeHandle&& other) noexcept {
-        if (this != &other) {
-            Close();
-            m_handle = other.m_handle;
-            other.m_handle = INVALID_HANDLE_VALUE;
-        }
-        return *this;
-    }
-};
-
-// Helper to determine root logs path
-std::string GetLogPath() {
-    if (!g_customLogPath.empty()) {
-        return g_customLogPath;
-    }
-
-    wchar_t path[MAX_PATH];
-    if (GetModuleFileNameW(NULL, path, MAX_PATH)) {
-        std::wstring wPath(path);
-        size_t pos = wPath.find_last_of(L"\\");
-        if (pos != std::wstring::npos) {
-            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
-            pos = dir.find_last_of(L"\\");
-            if (pos != std::wstring::npos) {
-                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
-                pos = root.find_last_of(L"\\");
-                if (pos != std::wstring::npos) {
-                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
-                    std::wstring logFile = projectRoot + L"\\logs\\mslc_host_debug.txt";
-                    return std::string(logFile.begin(), logFile.end());
-                }
-            }
-        }
-    }
-    return "C:\\Users\\Public\\mslc_host_debug.txt"; // Fallback
-}
+// Global server pipe handle for graceful shutdown
+static std::atomic<HANDLE> g_hServerPipe{ INVALID_HANDLE_VALUE };
 
 // =============================================================
 // HOST DEBUG LOGGER (Thread-Safe)
@@ -137,18 +79,26 @@ void LogHost(const char* category, const std::string& msg) {
         if (g_logRing.size() > LOG_MAX_LINES) g_logRing.pop_front();
 
         std::ofstream f(g_logPath, std::ios_base::trunc);
+        if (!f.is_open()) {
+            g_logPath = "C:\\Users\\Public\\mslc_host_debug.txt";
+            f.open(g_logPath, std::ios_base::trunc);
+        }
         if (f.is_open()) {
             for (const auto& line : g_logRing) f << line << '\n';
         }
     } else {
         std::ofstream f(g_logPath, std::ios_base::app);
+        if (!f.is_open()) {
+            g_logPath = "C:\\Users\\Public\\mslc_host_debug.txt";
+            f.open(g_logPath, std::ios_base::app);
+        }
         if (f.is_open()) {
             f << entry.str() << '\n';
         }
     }
 }
 
-static std::string TruncateForLog(const std::wstring& ws, size_t maxChars = 60) {
+std::string TruncateForLog(const std::wstring& ws, size_t maxChars = 60) {
     std::string narrow;
     narrow.reserve(ws.size());
     for (wchar_t wc : ws) {
@@ -160,14 +110,40 @@ static std::string TruncateForLog(const std::wstring& ws, size_t maxChars = 60) 
     return narrow;
 }
 
+// Helper to determine root logs path
+std::string GetLogPath() {
+    if (!g_customLogPath.empty()) {
+        return g_customLogPath;
+    }
+
+    wchar_t path[MAX_PATH];
+    if (GetModuleFileNameW(NULL, path, MAX_PATH)) {
+        std::wstring wPath(path);
+        size_t pos = wPath.find_last_of(L"\\");
+        if (pos != std::wstring::npos) {
+            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
+            pos = dir.find_last_of(L"\\");
+            if (pos != std::wstring::npos) {
+                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
+                pos = root.find_last_of(L"\\");
+                if (pos != std::wstring::npos) {
+                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
+                    std::wstring logFile = projectRoot + L"\\logs\\mslc_host_debug.txt";
+                    return std::string(logFile.begin(), logFile.end());
+                }
+            }
+        }
+    }
+    return "C:\\Users\\Public\\mslc_host_debug.txt"; // Fallback
+}
+
 // =============================================================
-// LOGGING STATE (guarded by g_csMutex)
+// LOGGING STATE
 // =============================================================
-static std::mutex g_csMutex;
-static DWORD64    g_pktCount    = 0;
-static DWORD64    g_totalBytes  = 0;
-static DWORD64    g_lastDelayMs = 0;
-static wchar_t    g_lastTs[20]  = L"--:--:--";
+DWORD64    g_pktCount    = 0;
+DWORD64    g_totalBytes  = 0;
+DWORD64    g_lastDelayMs = 0;
+wchar_t    g_lastTs[20]  = L"--:--:--";
 
 static size_t     g_lastLiveWidth = 0;
 
@@ -190,7 +166,7 @@ void ClearLiveText() {
     }
 }
 
-static void FormatTimestamp(DWORD64 ts_ms, wchar_t* buf, size_t bufLen) {
+void FormatTimestamp(DWORD64 ts_ms, wchar_t* buf, size_t bufLen) {
     DWORD64 total_sec = ts_ms / 1000;
     DWORD64 h = total_sec / 3600;
     DWORD64 m = (total_sec % 3600) / 60;
@@ -253,113 +229,25 @@ bool ParsePacket(const std::wstring& data, PipePacket& out) {
 }
 
 // =============================================================
-// SENTENCE SPLITTER - Delta Watermark State Machine
+// TRANSLATION EMISSION
 // =============================================================
-struct SentenceSplitter {
-    static constexpr wchar_t BOUNDARIES[] = L".?!";
-
-    std::wstring prev_text;
-    size_t       confirmed_len;
-    int          sentence_idx;
-    uint64_t     last_offset;
-
-    SentenceSplitter() : confirmed_len(0), sentence_idx(0), last_offset(0) {}
-
-    void Reset() {
-        prev_text.clear();
-        confirmed_len = 0;
-        last_offset = 0;
-    }
-
-    std::vector<std::wstring> ExtractNewSentences(const std::wstring& text, bool is_final, uint64_t offset) {
-        std::vector<std::wstring> results;
-
-        // Detect segment change via offset timeline
-        if (offset != last_offset && last_offset != 0) {
-            LogHost("SPLITTER", "New segment detected via offset change: " + 
-                std::to_string(last_offset) + " -> " + std::to_string(offset) + " -> RESET watermark");
-            Reset();
-        }
-        last_offset = offset;
-
-        // Coerce confirmed_len if text size is somehow shorter (defensive check)
-        if (text.size() < confirmed_len) {
-            confirmed_len = text.size();
-        }
-        prev_text = text;
-
-        if (is_final) {
-            std::wstring tail = text.substr(confirmed_len);
-            size_t start = tail.find_first_not_of(L' ');
-            if (start != std::wstring::npos) tail = tail.substr(start);
-
-            if (!tail.empty()) {
-                // Filter punctuation-only tail
-                bool has_alnum = false;
-                for (wchar_t wc : tail) {
-                    if (iswalnum(wc)) {
-                        has_alnum = true;
-                        break;
-                    }
-                }
-                if (has_alnum) {
-                    LogHost("SPLITTER",
-                        "FINAL tail_len=" + std::to_string(tail.size()) +
-                        " tail=\"" + TruncateForLog(tail) + "\" -> COMMIT");
-                    results.push_back(tail);
-                } else {
-                    LogHost("SPLITTER", "Filtered empty/punctuation-only final tail: \"" + TruncateForLog(tail) + "\"");
-                }
-            }
-            confirmed_len = text.size();
-            prev_text = text;
-            return results;
-        }
-
-        size_t scan_pos   = confirmed_len;
-        size_t commit_pos = confirmed_len;
-
-        while (scan_pos < text.size()) {
-            const wchar_t ch = text[scan_pos];
-            const bool is_boundary = (ch == L'.' || ch == L'?' || ch == L'!');
-
-            if (is_boundary) {
-                const bool at_end            = (scan_pos + 1 >= text.size());
-                const bool followed_by_space = !at_end && (text[scan_pos + 1] == L' ');
-
-                if (at_end || followed_by_space) {
-                    std::wstring sentence = text.substr(commit_pos, scan_pos - commit_pos + 1);
-                    size_t trim = sentence.find_first_not_of(L' ');
-                    if (trim != std::wstring::npos && trim > 0) sentence = sentence.substr(trim);
-
-                    if (!sentence.empty()) {
-                        // Filter out sentences containing only punctuation/spaces
-                        bool has_alnum = false;
-                        for (wchar_t wc : sentence) {
-                            if (iswalnum(wc)) {
-                                has_alnum = true;
-                                break;
-                            }
-                        }
-                        if (has_alnum) {
-                            LogHost("EMIT", "Emitting sentence: \"" + TruncateForLog(sentence) + "\"");
-                            results.push_back(sentence);
-                        } else {
-                            LogHost("SPLITTER", "Filtered empty/punctuation-only sentence: \"" + TruncateForLog(sentence) + "\"");
-                        }
-                    }
-                    commit_pos = scan_pos + 1;
-                }
-            }
-            ++scan_pos;
-        }
-
-        confirmed_len = commit_pos;
-        return results;
-    }
-};
-
-static SentenceSplitter g_splitter;
+void EmitTranslateCommit(const std::wstring& type, const std::wstring& text, uint64_t offset, uint64_t duration, DWORD64 ts_ms) {
+    g_transSegmenter.segment_id++;
+    double offset_sec = static_cast<double>(offset) / 10000000.0;
+    double duration_sec = static_cast<double>(duration) / 10000000.0;
+    
+    ClearLiveText();
+    
+    std::wcout << L"[TRANSLATE_COMMIT] [" << type << L"] " << g_transSegmenter.segment_id << L". " << text
+               << L" (offset: " << std::fixed << std::setprecision(2) << offset_sec << L"s"
+               << L", duration: " << duration_sec << L"s"
+               << L", ts: " << ts_ms << L")"
+               << std::endl;
+              
+    std::string narrowText(text.begin(), text.end());
+    std::string narrowType(type.begin(), type.end());
+    LogHost("TRANSLATE", "[" + narrowType + "] Segment " + std::to_string(g_transSegmenter.segment_id) + ": " + narrowText);
+}
 
 // =============================================================
 // DECOUPLED ARCHITECTURE: IPC PACKET QUEUE
@@ -412,6 +300,7 @@ void PipeListener() {
             continue;
         }
 
+        g_hServerPipe.store(hPipe);
         SafeHandle shPipe(hPipe);
 
         SafeHandle hConnectEvent(CreateEventW(NULL, TRUE, FALSE, NULL));
@@ -435,6 +324,7 @@ void PipeListener() {
         }
 
         if (!connected || g_exitHost || g_needReinjection) {
+            g_hServerPipe.store(INVALID_HANDLE_VALUE);
             continue;
         }
 
@@ -443,8 +333,9 @@ void PipeListener() {
         static constexpr DWORD PIPE_BUF_BYTES = 65536;
         std::vector<char> rawBuf(PIPE_BUF_BYTES);
         SafeHandle hReadEvent(CreateEventW(NULL, TRUE, FALSE, NULL));
+        std::string accumulatedBuffer;
 
-        while (!g_exitHost) {
+        while (!g_exitHost && !g_needReinjection) {
             OVERLAPPED ovRead = { 0 };
             ovRead.hEvent = hReadEvent.Get();
             DWORD bytesRead = 0;
@@ -483,16 +374,27 @@ void PipeListener() {
                 break;
             }
 
-            rawBuf[bytesRead] = '\0';
+            accumulatedBuffer.append(rawBuf.data(), bytesRead);
+            size_t pos;
             const DWORD64 recvTick = GetTickCount64();
+            while ((pos = accumulatedBuffer.find('\n')) != std::string::npos) {
+                std::string packetData = accumulatedBuffer.substr(0, pos);
+                accumulatedBuffer.erase(0, pos + 1);
 
-            {
-                std::lock_guard<std::mutex> lock(g_queueMutex);
-                g_packetQueue.push_back({ std::string(rawBuf.data(), bytesRead), recvTick });
-                g_queueCv.notify_one();
+                if (!packetData.empty()) {
+                    if (packetData.back() == '\r') {
+                        packetData.pop_back();
+                    }
+                    if (!packetData.empty()) {
+                        std::lock_guard<std::mutex> lock(g_queueMutex);
+                        g_packetQueue.push_back({ packetData, recvTick });
+                        g_queueCv.notify_one();
+                    }
+                }
             }
         }
 
+        g_hServerPipe.store(INVALID_HANDLE_VALUE);
         DisconnectNamedPipe(shPipe.Get());
         
         {
@@ -572,7 +474,9 @@ void MockClientThread(std::wstring pipeName) {
         "Yes, it seems to work beautifully!"
     };
     
+    uint64_t mockOffset = 100000;
     for (const auto& sentence : mockSentences) {
+        mockOffset += 500000;
         std::stringstream ss(sentence);
         std::string word;
         std::string currentText = "";
@@ -585,21 +489,26 @@ void MockClientThread(std::wstring pipeName) {
             std::string payload = "{\"text\":\"" + currentText + 
                                   "\",\"is_final\":false,\"bytes\":" + std::to_string(currentText.length()) + 
                                   ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
-                                  ",\"offset\":" + std::to_string(wordCount * 10000) + 
-                                  ",\"duration\":" + std::to_string(5000) + 
-                                  ",\"result_id\":\"mock_id_" + std::to_string(GetTickCount64() % 1000) + "\"}";
+                                  ",\"offset\":" + std::to_string(mockOffset) + 
+                                  ",\"duration\":" + std::to_string(wordCount * 5000) + 
+                                  ",\"result_id\":\"mock_id_" + std::to_string(GetTickCount64() % 1000) + "\"}\n";
             
             DWORD written = 0;
             WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
             Sleep(250); // Simulate typing
+
+            if (word == "splitter") {
+                LogHost("MOCK", "Simulating dynamic silence gap after word 'splitter'");
+                Sleep(1200); // 1.2 seconds silence gap (greater than default 800ms threshold)
+            }
         }
         
         std::string payload = "{\"text\":\"" + sentence + 
                               "\",\"is_final\":true,\"bytes\":" + std::to_string(sentence.length()) + 
                               ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
-                              ",\"offset\":" + std::to_string(wordCount * 10000) + 
-                              ",\"duration\":" + std::to_string(10000) + 
-                              ",\"result_id\":\"mock_id_final_" + std::to_string(GetTickCount64() % 1000) + "\"}";
+                              ",\"offset\":" + std::to_string(mockOffset) + 
+                              ",\"duration\":" + std::to_string(wordCount * 10000) + 
+                              ",\"result_id\":\"mock_id_final_" + std::to_string(GetTickCount64() % 1000) + "\"}\n";
         DWORD written = 0;
         WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
         Sleep(1000); // Interval between sentences
@@ -607,169 +516,6 @@ void MockClientThread(std::wstring pipeName) {
     
     CloseHandle(hPipe);
     LogHost("MOCK", "Mock client finished and disconnected.");
-}
-
-// =============================================================
-// PERMISSION & INJECTION
-// =============================================================
-void SetAppContainerPermission(const std::wstring& filePath) {
-    PACL pOldDACL = NULL, pNewDACL = NULL;
-    PSECURITY_DESCRIPTOR pSD = NULL;
-    EXPLICIT_ACCESSW ea = { 0 };
-    if (GetNamedSecurityInfoW(filePath.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                               NULL, NULL, &pOldDACL, NULL, &pSD) == ERROR_SUCCESS) {
-        BuildExplicitAccessWithNameW(&ea, const_cast<LPWSTR>(L"ALL APPLICATION PACKAGES"),
-                                     GENERIC_READ | GENERIC_EXECUTE,
-                                     SET_ACCESS, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
-        if (SetEntriesInAclW(1, &ea, pOldDACL, &pNewDACL) == ERROR_SUCCESS) {
-            SetNamedSecurityInfoW(const_cast<LPWSTR>(filePath.c_str()),
-                                  SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                                  NULL, NULL, pNewDACL, NULL);
-            LocalFree(pNewDACL);
-        }
-        LocalFree(pSD);
-    }
-}
-
-void SetAppContainerWritePermission(const std::wstring& filePath) {
-    PACL pOldDACL = NULL, pNewDACL = NULL;
-    PSECURITY_DESCRIPTOR pSD = NULL;
-    EXPLICIT_ACCESSW ea = { 0 };
-    if (GetNamedSecurityInfoW(filePath.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                               NULL, NULL, &pOldDACL, NULL, &pSD) == ERROR_SUCCESS) {
-        BuildExplicitAccessWithNameW(&ea, const_cast<LPWSTR>(L"ALL APPLICATION PACKAGES"),
-                                     GENERIC_READ | GENERIC_WRITE | GENERIC_ALL,
-                                     SET_ACCESS, SUB_CONTAINERS_AND_OBJECTS_INHERIT);
-        if (SetEntriesInAclW(1, &ea, pOldDACL, &pNewDACL) == ERROR_SUCCESS) {
-            SetNamedSecurityInfoW(const_cast<LPWSTR>(filePath.c_str()),
-                                  SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                                  NULL, NULL, pNewDACL, NULL);
-            LocalFree(pNewDACL);
-        }
-        LocalFree(pSD);
-    }
-}
-
-DWORD GetProcessIdByName(const wchar_t* processName) {
-    DWORD pid = 0;
-
-    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!hKernel32) return 0;
-
-    typedef HANDLE(WINAPI* CreateSnapshot_t)(DWORD, DWORD);
-    typedef BOOL(WINAPI* ProcessFirst_t)(HANDLE, LPPROCESSENTRY32W);
-    typedef BOOL(WINAPI* ProcessNext_t)(HANDLE, LPPROCESSENTRY32W);
-
-    char p1[] = { 'C','r','e','a','t','e','T','o','o','l','h','e','l','p','3','2','S','n','a','p','s','h','o','t',0 };
-    char p2[] = { 'P','r','o','c','e','s','s','3','2','F','i','r','s','t','W',0 };
-    char p3[] = { 'P','r','o','c','e','s','s','3','2','N','e','x','t','W',0 };
-
-    auto pCreateSnapshot = (CreateSnapshot_t)GetProcAddress(hKernel32, p1);
-    auto pProcessFirst    = (ProcessFirst_t)GetProcAddress(hKernel32, p2);
-    auto pProcessNext     = (ProcessNext_t)GetProcAddress(hKernel32, p3);
-
-    if (!pCreateSnapshot || !pProcessFirst || !pProcessNext) return 0;
-
-    HANDLE snapshot = pCreateSnapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32W entry = { sizeof(entry) };
-        if (pProcessFirst(snapshot, &entry)) {
-            do {
-                if (_wcsicmp(entry.szExeFile, processName) == 0) {
-                    pid = entry.th32ProcessID;
-                    break;
-                }
-            } while (pProcessNext(snapshot, &entry));
-        }
-        CloseHandle(snapshot);
-    }
-    return pid;
-}
-
-bool IsDLLAlreadyInjected(DWORD pid, const std::wstring& dllName) {
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
-    if (hSnapshot == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    MODULEENTRY32W me = { sizeof(me) };
-    bool found = false;
-    if (Module32FirstW(hSnapshot, &me)) {
-        do {
-            if (_wcsicmp(me.szModule, dllName.c_str()) == 0) {
-                found = true;
-                break;
-            }
-        } while (Module32NextW(hSnapshot, &me));
-    }
-    CloseHandle(hSnapshot);
-    return found;
-}
-
-bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
-    SetAppContainerPermission(dllPath);
-
-    DWORD dwDesiredAccess = PROCESS_CREATE_THREAD | 
-                            PROCESS_QUERY_INFORMATION | 
-                            PROCESS_VM_OPERATION | 
-                            PROCESS_VM_WRITE | 
-                            PROCESS_VM_READ;
-
-    SafeHandle shProcess(OpenProcess(dwDesiredAccess, FALSE, pid));
-    if (!shProcess.IsValid()) {
-        LogHost("INJECT", "OpenProcess failed (err=" + std::to_string(GetLastError()) + ")");
-        return false;
-    }
-
-    HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
-    if (!hKernel32) return false;
-
-    typedef LPVOID(WINAPI* VirtualAllocEx_t)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
-    typedef BOOL(WINAPI* WriteProcessMemory_t)(HANDLE, LPVOID, LPCVOID, SIZE_T, SIZE_T*);
-    typedef HANDLE(WINAPI* CreateRemoteThread_t)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
-
-    char v_a_e[] = { 'V','i','r','t','u','a','l','A','l','l','o','c','E','x',0 };
-    char w_p_m[] = { 'W','r','i','t','e','P','r','o','c','e','s','s','M','e','m','o','r','y',0 };
-    char c_r_t[] = { 'C','r','e','a','t','e','R','e','m','o','t','e','T','h','r','e','a','d',0 };
-    char l_l_w[] = { 'L','o','a','d','L','i','b','r','a','r','y','W',0 };
-
-    auto pVirtualAllocEx    = (VirtualAllocEx_t)GetProcAddress(hKernel32, v_a_e);
-    auto pWriteProcessMemory = (WriteProcessMemory_t)GetProcAddress(hKernel32, w_p_m);
-    auto pCreateRemoteThread = (CreateRemoteThread_t)GetProcAddress(hKernel32, c_r_t);
-    auto pLoadLibraryW       = GetProcAddress(hKernel32, l_l_w);
-
-    if (!pVirtualAllocEx || !pWriteProcessMemory || !pCreateRemoteThread || !pLoadLibraryW) {
-        return false;
-    }
-
-    const size_t allocSize = (dllPath.length() + 1) * sizeof(wchar_t);
-
-    struct RemoteAllocDeleter {
-        HANDLE hProc;
-        void operator()(void* ptr) const { if (ptr) VirtualFreeEx(hProc, ptr, 0, MEM_RELEASE); }
-    };
-
-    void* remoteMem = pVirtualAllocEx(shProcess.Get(), nullptr, allocSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remoteMem) {
-        LogHost("INJECT", "VirtualAllocEx failed (err=" + std::to_string(GetLastError()) + ")");
-        return false;
-    }
-    std::unique_ptr<void, RemoteAllocDeleter> remoteMemGuard(remoteMem, RemoteAllocDeleter{ shProcess.Get() });
-
-    if (!pWriteProcessMemory(shProcess.Get(), remoteMem, dllPath.c_str(), allocSize, nullptr)) {
-        LogHost("INJECT", "WriteProcessMemory failed (err=" + std::to_string(GetLastError()) + ")");
-        return false;
-    }
-
-    SafeHandle shThread(pCreateRemoteThread(shProcess.Get(), nullptr, 0,
-                                           reinterpret_cast<LPTHREAD_START_ROUTINE>(pLoadLibraryW),
-                                           remoteMem, 0, nullptr));
-    if (!shThread.IsValid()) {
-        LogHost("INJECT", "CreateRemoteThread failed (err=" + std::to_string(GetLastError()) + ")");
-        return false;
-    }
-
-    WaitForSingleObject(shThread.Get(), INFINITE);
-    return true;
 }
 
 // =============================================================
@@ -839,7 +585,22 @@ int main(int argc, char* argv[]) {
             HANDLE hFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
             if (hFile != INVALID_HANDLE_VALUE) {
                 CloseHandle(hFile);
-                SetAppContainerWritePermission(agentLogPath);
+                if (!SetAppContainerWritePermission(agentLogPath)) {
+                    LogHost("WARN", "SetAppContainerWritePermission failed for project Agent log path. Falling back to public path.");
+                    agentLogPath = L"C:\\Users\\Public\\mslc_agent_debug.txt";
+                    HANDLE hFallbackFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (hFallbackFile != INVALID_HANDLE_VALUE) {
+                        CloseHandle(hFallbackFile);
+                        SetAppContainerWritePermission(agentLogPath);
+                    }
+                }
+            } else {
+                agentLogPath = L"C:\\Users\\Public\\mslc_agent_debug.txt";
+                HANDLE hFallbackFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hFallbackFile != INVALID_HANDLE_VALUE) {
+                    CloseHandle(hFallbackFile);
+                    SetAppContainerWritePermission(agentLogPath);
+                }
             }
         }
     }
@@ -851,9 +612,8 @@ int main(int argc, char* argv[]) {
         _setmode(_fileno(stdout), _O_U16TEXT);
     }
 
-    // 4. Start Named Pipe Server
+    // 4. Start Named Pipe Server (Keep joinable for graceful shutdown)
     std::thread pipeServerThread(PipeListener);
-    pipeServerThread.detach();
 
     // 5. Start Mock Client Thread if in Mock Mode
     if (g_mockMode) {
@@ -997,6 +757,7 @@ int main(int argc, char* argv[]) {
                             break;
                         }
                     }
+                    CheckSilenceTimeout(GetTickCount64());
                     continue;
                 }
 
@@ -1034,60 +795,18 @@ int main(int argc, char* argv[]) {
                       " offset=" + std::to_string(pkt.offset) +
                       " duration=" + std::to_string(pkt.duration));
 
-            {
-                std::lock_guard<std::mutex> lock(g_csMutex);
-
-                g_pktCount++;
-                g_totalBytes  += pkt.bytes;
-                g_lastDelayMs  = delayMs;
-                FormatTimestamp(rawPkt.recvTick, g_lastTs, 20);
-
-                // Extract new sentences via Splitter
-                auto sentences = g_splitter.ExtractNewSentences(pkt.text, pkt.is_final, pkt.offset);
-                if (!sentences.empty()) {
-                    // Clear the current live line first to avoid character leftover
-                    ClearLiveText();
-
-                    for (const std::wstring& s : sentences) {
-                        ++g_splitter.sentence_idx;
-                        double offset_sec = static_cast<double>(pkt.offset) / 10000000.0;
-                        double duration_sec = static_cast<double>(pkt.duration) / 10000000.0;
-
-                        std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s 
-                                   << L" (offset: " << std::fixed << std::setprecision(2) << offset_sec << L"s"
-                                   << L", duration: " << duration_sec << L"s"
-                                   << L", id: " << pkt.result_id << L")"
-                                   << std::endl;
-                    }
-
-                    // Output stats immediately after COMMIT
-                    const DWORD64 avg = (g_pktCount > 0) ? (g_totalBytes / g_pktCount) : 0;
-                    std::wcout << L"[STATS] Pkts: " << g_pktCount
-                               << L" | Bytes: " << g_totalBytes
-                               << L" | Avg: " << avg << L" B"
-                               << L" | Delay: " << g_lastDelayMs << L" ms"
-                               << L" | Last: " << g_lastTs
-                               << std::endl;
-                }
-
-                // Display remaining live text
-                if (!pkt.is_final) {
-                    std::wstring liveText = pkt.text;
-                    if (g_splitter.confirmed_len < liveText.size()) {
-                        liveText = liveText.substr(g_splitter.confirmed_len);
-                        size_t start = liveText.find_first_not_of(L' ');
-                        if (start != std::wstring::npos) {
-                            liveText = liveText.substr(start);
-                        }
-                    } else {
-                        liveText.clear();
-                    }
-                    PrintLiveText(liveText);
-                } else {
-                    // If it is final, make sure to clean up the live line
-                    ClearLiveText();
-                }
-            }
+            // Call Refactored Text Processor module
+            ProcessTranslationAndSplitting(
+                pkt.text,
+                pkt.is_final,
+                pkt.offset,
+                pkt.duration,
+                pkt.ts_ms,
+                rawPkt.recvTick,
+                delayMs,
+                pkt.bytes,
+                pkt.result_id
+            );
         }
 
         // If we exited the consumer loop due to reinjection, reset target PID to trigger re-discovery
@@ -1098,5 +817,15 @@ int main(int argc, char* argv[]) {
 
     g_exitHost = true;
     g_queueCv.notify_all();
+
+    // Trigger graceful shutdown of the pipe server thread by closing its pipe handle
+    HANDLE hPipe = g_hServerPipe.exchange(INVALID_HANDLE_VALUE);
+    if (hPipe != INVALID_HANDLE_VALUE && hPipe != NULL) {
+        CloseHandle(hPipe);
+    }
+
+    if (pipeServerThread.joinable()) {
+        pipeServerThread.join();
+    }
     return 0;
 }
