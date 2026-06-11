@@ -156,7 +156,24 @@ std::string WideToUTF8(const std::wstring& wstr) {
 }
 
 void PrintLiveText(const std::wstring& text) {
-    std::wstring line = L"\r[LIVE] [~] " + text;
+    int consoleWidth = 80;
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+        consoleWidth = csbi.dwSize.X;
+    }
+    if (consoleWidth <= 0) consoleWidth = 80;
+
+    std::wstring prefix = L"\r[LIVE] [~] ";
+    std::wstring displayOpts = text;
+
+    if (prefix.size() + displayOpts.size() >= static_cast<size_t>(consoleWidth)) {
+        size_t maxTextLen = consoleWidth - prefix.size() - 4;
+        if (displayOpts.size() > maxTextLen) {
+            displayOpts = L"..." + displayOpts.substr(displayOpts.size() - maxTextLen);
+        }
+    }
+
+    std::wstring line = prefix + displayOpts;
     if (line.size() < g_lastLiveWidth) {
         line += std::wstring(g_lastLiveWidth - line.size(), L' ');
     }
