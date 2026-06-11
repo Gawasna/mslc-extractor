@@ -328,20 +328,20 @@ void ProcessTranslationAndSplitting(const std::wstring& pktText, bool isFinal, u
             double offset_sec = static_cast<double>(offset) / 10000000.0;
             double duration_sec = static_cast<double>(duration) / 10000000.0;
 
-            std::wcout << L"[COMMIT] " << g_splitter.sentence_idx << L". " << s 
-                       << L" (offset: " << std::fixed << std::setprecision(2) << offset_sec << L"s"
-                       << L", duration: " << duration_sec << L"s"
-                       << L", id: " << resultId << L")"
-                       << std::endl;
+            std::cout << "[COMMIT] " << g_splitter.sentence_idx << ". " << WideToUTF8(s) 
+                      << " (offset: " << std::fixed << std::setprecision(2) << offset_sec << "s"
+                      << ", duration: " << duration_sec << "s"
+                      << ", id: " << WideToUTF8(resultId) << ")"
+                      << std::endl;
         }
 
         // Output stats immediately after COMMIT
         const DWORD64 avg = (g_pktCount > 0) ? (g_totalBytes / g_pktCount) : 0;
-        std::wcout << L"[STATS] Pkts: " << g_pktCount
-                   << L" | Bytes: " << g_totalBytes
-                   << L" | Avg: " << avg << L" B"
-                   << L" | Delay: " << g_lastDelayMs << L" ms"
-                   << L" | Last: " << g_lastTs
+        std::cout << "[STATS] Pkts: " << g_pktCount
+                   << " | Bytes: " << g_totalBytes
+                   << " | Avg: " << avg << " B"
+                   << " | Delay: " << g_lastDelayMs << " ms"
+                   << " | Last: " << WideToUTF8(g_lastTs)
                    << std::endl;
     }
 
