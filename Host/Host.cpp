@@ -279,7 +279,7 @@ void PipeListener() {
     // Allow AppContainers (S-1-15-2-1) & Everyone (WD) generic Read/Write.
     // Local System (SY) & Administrators (BA) generic All.
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:(A;;GRGW;;;S-1-15-2-1)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)", 
+            L"D:(A;;GRGW;;;S-1-15-2-1)(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)S:(ML;;NW;;;LW)", 
             SDDL_REVISION_1, 
             &pSD, 
             NULL)) {

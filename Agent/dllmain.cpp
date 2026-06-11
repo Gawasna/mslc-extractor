@@ -219,7 +219,7 @@ DWORD WINAPI SenderThread(LPVOID /*lpParam*/) {
                 } else {
                     DWORD err = GetLastError();
                     // Smart Backoff (Exponential Backoff with Jitter)
-                    retryCount = (std::min)(retryCount + 1, 5); // Max delay ~32s
+                    retryCount = (std::min)(retryCount + 1, 2); // Max delay ~4s
                     int backoffMs = (1 << retryCount) * 1000;
                     
                     // Simple Jitter (0-500ms) using system tick to avoid Sonar cpp:S2245 (Weak Cryptography)
