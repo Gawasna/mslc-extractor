@@ -730,6 +730,9 @@ int main(int argc, char* argv[]) {
 
             if (g_injectOnly) {
                 LogHost("SESSION", "Inject-only mode completed. Exiting.");
+                if (pipeServerThread.joinable()) {
+                    pipeServerThread.detach();
+                }
                 return 0;
             }
         } else {
