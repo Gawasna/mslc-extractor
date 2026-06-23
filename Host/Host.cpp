@@ -58,14 +58,20 @@ void LogHost(const char* category, const std::string& msg) {
 
     SYSTEMTIME st;
     GetLocalTime(&st);
+    DWORD threadId = GetCurrentThreadId();
 
     std::ostringstream entry;
     entry << '['
           << std::setfill('0')
+          << std::setw(4) << st.wYear   << '-'
+          << std::setw(2) << st.wMonth  << '-'
+          << std::setw(2) << st.wDay    << 'T'
           << std::setw(2) << st.wHour   << ':'
           << std::setw(2) << st.wMinute << ':'
           << std::setw(2) << st.wSecond << '.'
           << std::setw(3) << st.wMilliseconds
+          << "] [TID:"
+          << std::setw(5) << threadId
           << "] ["
           << std::setfill(' ') // Reset fill character to space
           << std::left << std::setw(8) << category
@@ -493,6 +499,7 @@ void MockClientThread(std::wstring pipeName) {
     std::vector<std::string> mockSentences = {
         "Hello, this is a mock subtitle test.",
         "We are verifying the split-view console user interface.",
+        "I have lived here for four months already.",
         "The delta watermark sentence splitter should process this correctly.",
         "It splits incoming text stream by punctuation marks.",
         "Does the mock verification look good?",
@@ -515,12 +522,31 @@ void MockClientThread(std::wstring pipeName) {
                                   "\",\"is_final\":false,\"bytes\":" + std::to_string(currentText.length()) + 
                                   ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
                                   ",\"offset\":" + std::to_string(mockOffset) + 
-                                  ",\"duration\":" + std::to_string(wordCount * 5000) + 
+                                  ",\"duration\":" + std::to_string(wordCount * 3000000) + 
                                   ",\"result_id\":\"mock_id_" + std::to_string(GetTickCount64() % 1000) + "\"}\n";
             
             DWORD written = 0;
             WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);
             Sleep(250); // Simulate typing
+
+            // ATOM2 Simulation: Prefix Mutation
+            if (word == "four") {
+                LogHost("MOCK", "Simulating ATOM2 prefix mutation: 'four' -> '4'");
+                Sleep(200);
+                size_t pos = currentText.rfind("four");
+                if (pos != std::string::npos) {
+                    currentText.replace(pos, 4, "4");
+                }
+                
+                std::string payload2 = "{\"text\":\"" + currentText + 
+                                      "\",\"is_final\":false,\"bytes\":" + std::to_string(currentText.length()) + 
+                                      ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
+                                      ",\"offset\":" + std::to_string(mockOffset) + 
+                                      ",\"duration\":" + std::to_string(wordCount * 3000000) + 
+                                      ",\"result_id\":\"mock_id_" + std::to_string(GetTickCount64() % 1000) + "\"}\n";
+                WriteFile(hPipe, payload2.c_str(), static_cast<DWORD>(payload2.length()), &written, NULL);
+                Sleep(250);
+            }
 
             if (word == "splitter") {
                 LogHost("MOCK", "Simulating dynamic silence gap after word 'splitter'");
@@ -532,7 +558,7 @@ void MockClientThread(std::wstring pipeName) {
                               "\",\"is_final\":true,\"bytes\":" + std::to_string(sentence.length()) + 
                               ",\"ts_ms\":" + std::to_string(GetTickCount64()) + 
                               ",\"offset\":" + std::to_string(mockOffset) + 
-                              ",\"duration\":" + std::to_string(wordCount * 10000) + 
+                              ",\"duration\":" + std::to_string(wordCount * 3000000) + 
                               ",\"result_id\":\"mock_id_final_" + std::to_string(GetTickCount64() % 1000) + "\"}\n";
         DWORD written = 0;
         WriteFile(hPipe, payload.c_str(), static_cast<DWORD>(payload.length()), &written, NULL);

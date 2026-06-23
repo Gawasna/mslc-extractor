@@ -39,13 +39,13 @@ struct TranslationSegmenter {
     std::wstring prev_text;
     size_t segment_id;
     
-    std::vector<DWORD64> speech_gaps;
-    static constexpr size_t MAX_GAPS_HISTORY = 20;
+    std::vector<double> avg_word_history;
+    static constexpr size_t MAX_WORD_HISTORY = 10;
 
     TranslationSegmenter();
     void Reset();
     DWORD64 GetAdaptiveThreshold() const;
-    void AddGap(DWORD64 gap);
+    void UpdatePacing(const std::wstring& text, uint64_t duration);
 };
 
 // =============================================================
