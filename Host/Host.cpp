@@ -45,6 +45,101 @@ static std::string g_logPath = "";
 static std::atomic<HANDLE> g_hServerPipe{ INVALID_HANDLE_VALUE };
 
 // =============================================================
+// LOG ROTATION HELPERS
+// =============================================================
+void RotateLogsW(const std::wstring& basePath) {
+    if (basePath.empty()) return;
+
+    size_t lastSlash = basePath.find_last_of(L"\\/");
+    std::wstring dir = (lastSlash != std::wstring::npos) ? basePath.substr(0, lastSlash + 1) : L"";
+    std::wstring fileWithExt = (lastSlash != std::wstring::npos) ? basePath.substr(lastSlash + 1) : basePath;
+    
+    size_t lastDot = fileWithExt.find_last_of(L'.');
+    std::wstring filename = (lastDot != std::wstring::npos) ? fileWithExt.substr(0, lastDot) : fileWithExt;
+    std::wstring ext = (lastDot != std::wstring::npos) ? fileWithExt.substr(lastDot) : L"";
+
+    DWORD attr = GetFileAttributesW(basePath.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        wchar_t ts[32];
+        swprintf_s(ts, L"%04d%02d%02d_%02d%02d%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        
+        std::wstring archivePath = dir + filename + L"_" + ts + ext;
+        MoveFileExW(basePath.c_str(), archivePath.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+
+    std::wstring searchPattern = dir + filename + L"_*_*" + ext;
+    
+    std::vector<std::wstring> archives;
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(searchPattern.c_str(), &findData);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                archives.push_back(dir + findData.cFileName);
+            }
+        } while (FindNextFileW(hFind, &findData));
+        FindClose(hFind);
+    }
+
+    std::sort(archives.begin(), archives.end());
+
+    if (archives.size() > 4) {
+        size_t filesToDelete = archives.size() - 4;
+        for (size_t i = 0; i < filesToDelete; ++i) {
+            DeleteFileW(archives[i].c_str());
+        }
+    }
+}
+
+void RotateLogsA(const std::string& basePath) {
+    if (basePath.empty()) return;
+
+    size_t lastSlash = basePath.find_last_of("\\/");
+    std::string dir = (lastSlash != std::string::npos) ? basePath.substr(0, lastSlash + 1) : "";
+    std::string fileWithExt = (lastSlash != std::string::npos) ? basePath.substr(lastSlash + 1) : basePath;
+    
+    size_t lastDot = fileWithExt.find_last_of('.');
+    std::string filename = (lastDot != std::string::npos) ? fileWithExt.substr(0, lastDot) : fileWithExt;
+    std::string ext = (lastDot != std::string::npos) ? fileWithExt.substr(lastDot) : "";
+
+    DWORD attr = GetFileAttributesA(basePath.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char ts[32];
+        sprintf_s(ts, "%04d%02d%02d_%02d%02d%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        
+        std::string archivePath = dir + filename + "_" + ts + ext;
+        MoveFileExA(basePath.c_str(), archivePath.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+
+    std::string searchPattern = dir + filename + "_*_*" + ext;
+    
+    std::vector<std::string> archives;
+    WIN32_FIND_DATAA findData;
+    HANDLE hFind = FindFirstFileA(searchPattern.c_str(), &findData);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                archives.push_back(dir + findData.cFileName);
+            }
+        } while (FindNextFileA(hFind, &findData));
+        FindClose(hFind);
+    }
+
+    std::sort(archives.begin(), archives.end());
+
+    if (archives.size() > 4) {
+        size_t filesToDelete = archives.size() - 4;
+        for (size_t i = 0; i < filesToDelete; ++i) {
+            DeleteFileA(archives[i].c_str());
+        }
+    }
+}
+
+// =============================================================
 // HOST DEBUG LOGGER (Thread-Safe)
 // =============================================================
 static constexpr size_t        LOG_MAX_LINES = 100;
@@ -86,7 +181,7 @@ void LogHost(const char* category, const std::string& msg) {
 
         std::ofstream f(g_logPath, std::ios_base::trunc);
         if (!f.is_open()) {
-            g_logPath = "C:\\Users\\Public\\mslc_host_debug.txt";
+            g_logPath = "C:\\Users\\Public\\mslc_host_debug.log";
             f.open(g_logPath, std::ios_base::trunc);
         }
         if (f.is_open()) {
@@ -95,7 +190,7 @@ void LogHost(const char* category, const std::string& msg) {
     } else {
         std::ofstream f(g_logPath, std::ios_base::app);
         if (!f.is_open()) {
-            g_logPath = "C:\\Users\\Public\\mslc_host_debug.txt";
+            g_logPath = "C:\\Users\\Public\\mslc_host_debug.log";
             f.open(g_logPath, std::ios_base::app);
         }
         if (f.is_open()) {
@@ -127,20 +222,25 @@ std::string GetLogPath() {
         std::wstring wPath(path);
         size_t pos = wPath.find_last_of(L"\\");
         if (pos != std::wstring::npos) {
-            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
-            pos = dir.find_last_of(L"\\");
-            if (pos != std::wstring::npos) {
-                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
-                pos = root.find_last_of(L"\\");
+            std::wstring dir = wPath.substr(0, pos); // Thư mục chứa exe
+            if (dir.find(L"x64\\Release") != std::wstring::npos || dir.find(L"x64\\Debug") != std::wstring::npos) {
+                pos = dir.find_last_of(L"\\");
                 if (pos != std::wstring::npos) {
-                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
-                    std::wstring logFile = projectRoot + L"\\logs\\mslc_host_debug.txt";
-                    return std::string(logFile.begin(), logFile.end());
+                    std::wstring root = dir.substr(0, pos);
+                    pos = root.find_last_of(L"\\");
+                    if (pos != std::wstring::npos) {
+                        std::wstring projectRoot = root.substr(0, pos);
+                        std::wstring logFile = projectRoot + L"\\logs\\mslc_host_debug.log";
+                        return std::string(logFile.begin(), logFile.end());
+                    }
                 }
+            } else {
+                std::wstring logFile = dir + L"\\logs\\mslc_host_debug.log";
+                return std::string(logFile.begin(), logFile.end());
             }
         }
     }
-    return "C:\\Users\\Public\\mslc_host_debug.txt"; // Fallback
+    return "C:\\Users\\Public\\mslc_host_debug.log"; // Fallback
 }
 
 // =============================================================
@@ -609,6 +709,7 @@ int main(int argc, char* argv[]) {
         std::string logDir = g_logPath.substr(0, lastSlash);
         CreateDirectoryA(logDir.c_str(), NULL);
     }
+    RotateLogsA(g_logPath);
 
     // Prepare Agent log file and grant write access to AppContainers
     if (!g_mockMode) {
@@ -620,25 +721,31 @@ int main(int argc, char* argv[]) {
                 size_t pos = wPath.find_last_of(L"\\");
                 if (pos != std::wstring::npos) {
                     std::wstring dir = wPath.substr(0, pos);
-                    pos = dir.find_last_of(L"\\");
-                    if (pos != std::wstring::npos) {
-                        std::wstring root = dir.substr(0, pos);
-                        pos = root.find_last_of(L"\\");
+                    if (dir.find(L"x64\\Release") != std::wstring::npos || dir.find(L"x64\\Debug") != std::wstring::npos) {
+                        pos = dir.find_last_of(L"\\");
                         if (pos != std::wstring::npos) {
-                            std::wstring projectRoot = root.substr(0, pos);
-                            agentLogPath = projectRoot + L"\\logs\\mslc_agent_debug.txt";
+                            std::wstring root = dir.substr(0, pos);
+                            pos = root.find_last_of(L"\\");
+                            if (pos != std::wstring::npos) {
+                                std::wstring projectRoot = root.substr(0, pos);
+                                agentLogPath = projectRoot + L"\\logs\\mslc_agent_debug.log";
+                            }
                         }
+                    } else {
+                        agentLogPath = dir + L"\\logs\\mslc_agent_debug.log";
                     }
                 }
             }
         }
         if (!agentLogPath.empty()) {
+            RotateLogsW(agentLogPath);
             HANDLE hFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
             if (hFile != INVALID_HANDLE_VALUE) {
                 CloseHandle(hFile);
                 if (!SetAppContainerWritePermission(agentLogPath)) {
                     LogHost("WARN", "SetAppContainerWritePermission failed for project Agent log path. Falling back to public path.");
-                    agentLogPath = L"C:\\Users\\Public\\mslc_agent_debug.txt";
+                    agentLogPath = L"C:\\Users\\Public\\mslc_agent_debug.log";
+                    RotateLogsW(agentLogPath);
                     HANDLE hFallbackFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
                     if (hFallbackFile != INVALID_HANDLE_VALUE) {
                         CloseHandle(hFallbackFile);
@@ -646,7 +753,8 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else {
-                agentLogPath = L"C:\\Users\\Public\\mslc_agent_debug.txt";
+                agentLogPath = L"C:\\Users\\Public\\mslc_agent_debug.log";
+                RotateLogsW(agentLogPath);
                 HANDLE hFallbackFile = CreateFileW(agentLogPath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
                 if (hFallbackFile != INVALID_HANDLE_VALUE) {
                     CloseHandle(hFallbackFile);

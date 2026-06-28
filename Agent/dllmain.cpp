@@ -77,20 +77,25 @@ std::string GetLogPath() {
         std::wstring wPath(path);
         size_t pos = wPath.find_last_of(L"\\");
         if (pos != std::wstring::npos) {
-            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
-            pos = dir.find_last_of(L"\\");
-            if (pos != std::wstring::npos) {
-                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
-                pos = root.find_last_of(L"\\");
+            std::wstring dir = wPath.substr(0, pos); // Thư mục chứa dll
+            if (dir.find(L"x64\\Release") != std::wstring::npos || dir.find(L"x64\\Debug") != std::wstring::npos) {
+                pos = dir.find_last_of(L"\\");
                 if (pos != std::wstring::npos) {
-                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
-                    std::wstring logFile = projectRoot + L"\\logs\\mslc_agent_debug.txt";
-                    return std::string(logFile.begin(), logFile.end());
+                    std::wstring root = dir.substr(0, pos);
+                    pos = root.find_last_of(L"\\");
+                    if (pos != std::wstring::npos) {
+                        std::wstring projectRoot = root.substr(0, pos);
+                        std::wstring logFile = projectRoot + L"\\logs\\mslc_agent_debug.log";
+                        return std::string(logFile.begin(), logFile.end());
+                    }
                 }
+            } else {
+                std::wstring logFile = dir + L"\\logs\\mslc_agent_debug.log";
+                return std::string(logFile.begin(), logFile.end());
             }
         }
     }
-    return "C:\\Users\\Public\\mslc_agent_debug.txt"; // Fallback
+    return "C:\\Users\\Public\\mslc_agent_debug.log"; // Fallback
 }
 
 // =============================================================
@@ -120,6 +125,7 @@ void LogToFile(const char* level, const std::string& msg) {
         logFile << entry.str() << '\n';
     }
 }
+
 
 inline void LogInfo (const std::string& m) { LogToFile("INFO ", m); }
 inline void LogWarn (const std::string& m) { LogToFile("WARN ", m); }
