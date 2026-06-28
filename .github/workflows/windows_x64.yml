@@ -21,6 +21,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify tag is on master branch
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $isOnMaster = git branch -r --contains ${{ github.sha }} | Select-String "origin/master"
+          if (-not $isOnMaster) {
+            Write-Error "This tag commit does not belong to the master branch. Releases are only allowed from master."
+            exit 1
+          }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
