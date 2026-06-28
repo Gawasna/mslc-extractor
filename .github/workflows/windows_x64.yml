@@ -25,23 +25,39 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet packages
+        # nuget restore resolves the native MinHook package committed under packages/.
+        # If the packages/ folder is present in the repo, nuget reads packages.config
+        # and skips downloading; this step is kept for correctness and future packages.
         run: nuget restore Native.sln
 
       - name: Build solution (x64 Release)
         run: msbuild Native.sln /m /p:Configuration=Release /p:Platform=x64
 
+      - name: Verify build outputs exist
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          $required = @('Host.exe', 'Agent.dll')
+          foreach ($file in $required) {
+            $path = Join-Path $out $file
+            if (-not (Test-Path $path)) {
+              Write-Error "Required build output not found: $path"
+              exit 1
+            }
+            Write-Host "OK: $file ($([math]::Round((Get-Item $path).Length / 1KB, 1)) KB)"
+          }
+
       - name: Create SHA256SUMS.txt
         shell: pwsh
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
-          if (-not (Test-Path $out)) { Write-Error "Output folder not found: $out"; exit 1 }
-          $sumfile = Join-Path $out "SHA256SUMS.txt"
+          $sumfile = Join-Path $out 'SHA256SUMS.txt'
           Get-ChildItem -Path $out -File |
             Where-Object { $_.Extension -in '.exe', '.dll' } |
             Sort-Object Name |
             ForEach-Object {
               $h = Get-FileHash $_.FullName -Algorithm SHA256
-              "{0}  {1}" -f $h.Hash, $_.Name
+              "{0}  {1}" -f $h.Hash.ToLower(), $_.Name
             } | Out-File -FilePath $sumfile -Encoding ASCII
           Write-Host "Checksums written to $sumfile"
           Get-Content $sumfile
@@ -52,19 +68,23 @@ jobs:
           $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "manual" }
           $zipName = "mslc-extractor-$tag-win-x64.zip"
-          $zipPath = Join-Path $out $zipName
+          # Use the workspace root (forward-slash safe) as staging location to
+          # avoid putting the zip inside the folder being zipped.
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE $zipName
           if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          Compress-Archive -Path "$out\Loader.exe", "$out\HookCore.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
-          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
-          echo "ZIP_PATH=$zipPath" >> $env:GITHUB_ENV
-          Write-Host "Created artifact: $zipName"
+          Compress-Archive -Path "$out\Host.exe", "$out\Agent.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
+          # Write env vars using relative paths and Add-Content for cross-shell safety and BOM prevention.
+          Add-Content -Path $env:GITHUB_ENV -Value "ZIP_NAME=$zipName"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZIP_PATH=$zipName"
+          Write-Host "Created artifact: $zipName at $zipPath"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
         with:
           subject-path: |
-            x64/Release/Loader.exe
-            x64/Release/HookCore.dll
+            x64/Release/Host.exe
+            x64/Release/Agent.dll
             x64/Release/SHA256SUMS.txt
             ${{ env.ZIP_PATH }}
 
@@ -80,6 +100,7 @@ jobs:
         with:
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
+          allowUpdates: true
           body: |
             ### Binaries Details
             - **Platform**: Windows x64

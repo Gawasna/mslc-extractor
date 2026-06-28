@@ -77,20 +77,25 @@ std::string GetLogPath() {
         std::wstring wPath(path);
         size_t pos = wPath.find_last_of(L"\\");
         if (pos != std::wstring::npos) {
-            std::wstring dir = wPath.substr(0, pos); // C:\Users\...\x64\Release
-            pos = dir.find_last_of(L"\\");
-            if (pos != std::wstring::npos) {
-                std::wstring root = dir.substr(0, pos); // C:\Users\...\x64
-                pos = root.find_last_of(L"\\");
+            std::wstring dir = wPath.substr(0, pos); // Thư mục chứa dll
+            if (dir.find(L"x64\\Release") != std::wstring::npos || dir.find(L"x64\\Debug") != std::wstring::npos) {
+                pos = dir.find_last_of(L"\\");
                 if (pos != std::wstring::npos) {
-                    std::wstring projectRoot = root.substr(0, pos); // C:\Users\...\mslc-extractor
-                    std::wstring logFile = projectRoot + L"\\logs\\mslc_agent_debug.txt";
-                    return std::string(logFile.begin(), logFile.end());
+                    std::wstring root = dir.substr(0, pos);
+                    pos = root.find_last_of(L"\\");
+                    if (pos != std::wstring::npos) {
+                        std::wstring projectRoot = root.substr(0, pos);
+                        std::wstring logFile = projectRoot + L"\\logs\\mslc_agent_debug.log";
+                        return std::string(logFile.begin(), logFile.end());
+                    }
                 }
+            } else {
+                std::wstring logFile = dir + L"\\logs\\mslc_agent_debug.log";
+                return std::string(logFile.begin(), logFile.end());
             }
         }
     }
-    return "C:\\Users\\Public\\mslc_agent_debug.txt"; // Fallback
+    return "C:\\Users\\Public\\mslc_agent_debug.log"; // Fallback
 }
 
 // =============================================================
@@ -120,6 +125,7 @@ void LogToFile(const char* level, const std::string& msg) {
         logFile << entry.str() << '\n';
     }
 }
+
 
 inline void LogInfo (const std::string& m) { LogToFile("INFO ", m); }
 inline void LogWarn (const std::string& m) { LogToFile("WARN ", m); }
@@ -219,7 +225,7 @@ DWORD WINAPI SenderThread(LPVOID /*lpParam*/) {
                 } else {
                     DWORD err = GetLastError();
                     // Smart Backoff (Exponential Backoff with Jitter)
-                    retryCount = (std::min)(retryCount + 1, 5); // Max delay ~32s
+                    retryCount = (std::min)(retryCount + 1, 2); // Max delay ~4s
                     int backoffMs = (1 << retryCount) * 1000;
                     
                     // Simple Jitter (0-500ms) using system tick to avoid Sonar cpp:S2245 (Weak Cryptography)
@@ -288,7 +294,7 @@ static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_
          << ",\"offset\":"   << offset
          << ",\"duration\":" << duration
          << ",\"result_id\":\"" << result_id << "\""
-         << '}';
+         << "}\n";
     return json.str();
 }
 
@@ -396,9 +402,11 @@ int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint
 }
 
 // =============================================================
-// HOOK INSTALLATION THREAD (Safe environment outside Loader Lock)
+// HOOK INSTALLATION THREAD (Safe environment outside Windows Loader Lock)
 // =============================================================
 DWORD WINAPI HookThread(LPVOID lpParam) {
+    // Yield execution to allow DLL loading thread to complete DllMain and exit Windows Loader Lock
+    Sleep(100);
     HMODULE hCoreDLL = reinterpret_cast<HMODULE>(lpParam);
     
     if (hCoreDLL == nullptr) {
@@ -483,7 +491,7 @@ VOID NTAPI DllNotificationCallback(ULONG NotificationReason, PLDR_DLL_NOTIFICATI
             if (dllName.find(L"microsoft.cognitiveservices.speech.core.dll") != std::wstring::npos) {
                 if (!g_hookInstalled.exchange(true)) {
                     LogInfo("DllNotification: Target DLL loaded. Launching HookThread.");
-                    // Start hook thread outside of Loader Lock
+                    // Start hook thread outside of Windows Loader Lock
                     CreateThread(NULL, 0, HookThread, NotificationData->DllBase, 0, NULL);
                 }
             }
