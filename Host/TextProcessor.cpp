@@ -47,8 +47,26 @@ std::vector<std::wstring> SentenceSplitter::ExtractNewSentences(const std::wstri
     }
     last_offset = offset;
 
-    // Coerce confirmed_len if text size is somehow shorter (defensive check)
-    if (text.size() < confirmed_len) {
+    // Calculate LCP to handle retroactive mutation
+    if (!prev_text.empty()) {
+        size_t min_len = (std::min)(prev_text.size(), text.size());
+        size_t lcp = 0;
+        while (lcp < min_len && prev_text[lcp] == text[lcp]) {
+            lcp++;
+        }
+        
+        if (lcp < prev_text.size()) {
+            std::wstring old_tail = prev_text.substr(lcp);
+            std::wstring new_tail = text.substr(lcp);
+            LogHost("ATOM2", "Splitter Mutation: '" + WideToUTF8(old_tail) + "' -> '" + WideToUTF8(new_tail) + "' (LCP: " + std::to_string(lcp) + ")");
+        }
+
+        if (lcp < confirmed_len) {
+            LogHost("SPLITTER", "[ATOM2] Danger! Rolling back confirmed_len from " + 
+                                std::to_string(confirmed_len) + " to " + std::to_string(lcp));
+            confirmed_len = lcp;
+        }
+    } else if (text.size() < confirmed_len) {
         confirmed_len = text.size();
     }
     prev_text = text;
@@ -62,7 +80,7 @@ std::vector<std::wstring> SentenceSplitter::ExtractNewSentences(const std::wstri
             // Filter punctuation-only tail
             bool has_alnum = false;
             for (wchar_t wc : tail) {
-                if (iswalnum(wc)) {
+                if (wc > 0x7F || iswalnum(wc)) {
                     has_alnum = true;
                     break;
                 }
@@ -101,7 +119,7 @@ std::vector<std::wstring> SentenceSplitter::ExtractNewSentences(const std::wstri
                     // Filter out sentences containing only punctuation/spaces
                     bool has_alnum = false;
                     for (wchar_t wc : sentence) {
-                        if (iswalnum(wc)) {
+                        if (wc > 0x7F || iswalnum(wc)) {
                             has_alnum = true;
                             break;
                         }
@@ -134,31 +152,45 @@ void TranslationSegmenter::Reset() {
 }
 
 DWORD64 TranslationSegmenter::GetAdaptiveThreshold() const {
-    if (speech_gaps.size() < 5) {
+    if (avg_word_history.empty()) {
         return 800; // Default 800ms
     }
     double sum = 0;
-    for (DWORD64 g : speech_gaps) {
-        sum += g;
+    for (double v : avg_word_history) {
+        sum += v;
     }
-    double mean = sum / speech_gaps.size();
+    double mean_ms_per_word = sum / avg_word_history.size();
     
-    double sq_sum = 0;
-    for (DWORD64 g : speech_gaps) {
-        sq_sum += (g - mean) * (g - mean);
-    }
-    double variance = sq_sum / speech_gaps.size();
-    double std_dev = std::sqrt(variance);
-    
-    DWORD64 thresh = static_cast<DWORD64>(mean + 1.5 * std_dev);
-    return (std::max)(static_cast<DWORD64>(700), (std::min)(static_cast<DWORD64>(1500), thresh));
+    // A pause is typically 2.5x to 3x the average word duration
+    double thresh = mean_ms_per_word * 2.8;
+    return static_cast<DWORD64>((std::max)(600.0, (std::min)(1500.0, thresh)));
 }
 
-void TranslationSegmenter::AddGap(DWORD64 gap) {
-    if (gap >= 100 && gap <= 3000) {
-        speech_gaps.push_back(gap);
-        if (speech_gaps.size() > MAX_GAPS_HISTORY) {
-            speech_gaps.erase(speech_gaps.begin());
+void TranslationSegmenter::UpdatePacing(const std::wstring& text, uint64_t duration) {
+    if (duration == 0 || text.empty()) return;
+    
+    // Tokenize takes time, but we can just do a fast space count for pacing
+    size_t word_count = 1;
+    for (wchar_t wc : text) {
+        if (wc == L' ') word_count++;
+    }
+    
+    if (word_count >= 3) {
+        double ms = static_cast<double>(duration) / 10000.0;
+        double ms_per_word = ms / word_count;
+        
+        if (ms_per_word > 100.0 && ms_per_word < 1500.0) {
+            avg_word_history.push_back(ms_per_word);
+            if (avg_word_history.size() > MAX_WORD_HISTORY) {
+                avg_word_history.erase(avg_word_history.begin());
+            }
+            
+            // Log for debugging
+            double sum = 0;
+            for (double v : avg_word_history) sum += v;
+            double mean = sum / avg_word_history.size();
+            LogHost("PACING", "Current packet ms/word: " + std::to_string(ms_per_word) + 
+                              " | Moving Avg: " + std::to_string(mean) + "ms");
         }
     }
 }
@@ -166,6 +198,15 @@ void TranslationSegmenter::AddGap(DWORD64 gap) {
 // =============================================================
 // TEXT HELPERS
 // =============================================================
+static size_t GetCommonPrefixLength(const std::wstring& s1, const std::wstring& s2) {
+    size_t min_len = (std::min)(s1.size(), s2.size());
+    size_t i = 0;
+    while (i < min_len && s1[i] == s2[i]) {
+        i++;
+    }
+    return i;
+}
+
 static bool IsConjunction(const std::wstring& clean_word) {
     static const std::vector<std::wstring> conj = {
         L"and", L"but", L"or", L"so", L"because", L"that", L"which",
@@ -186,7 +227,7 @@ static std::wstring CleanAndLower(const std::wstring& ws, bool& ends_with_punc) 
     }
     
     for (wchar_t wc : ws) {
-        if (iswalnum(wc)) {
+        if (wc > 0x7F || iswalnum(wc)) {
             clean.push_back(towlower(wc));
         }
     }
@@ -229,7 +270,7 @@ static std::vector<WordInfo> Tokenize(const std::wstring& text) {
 
 static bool HasAlnum(const std::wstring& s) {
     for (wchar_t wc : s) {
-        if (iswalnum(wc)) return true;
+        if (wc > 0x7F || iswalnum(wc)) return true;
     }
     return false;
 }
@@ -252,16 +293,24 @@ void ProcessTranslationAndSplitting(const std::wstring& pktText, bool isFinal, u
             }
         }
         g_transSegmenter.Reset();
+    } else if (offset == g_transSegmenter.last_offset && !g_transSegmenter.prev_text.empty()) {
+        size_t lcp = GetCommonPrefixLength(g_transSegmenter.prev_text, pktText);
+        if (lcp < g_transSegmenter.prev_text.size()) {
+            std::wstring old_tail = g_transSegmenter.prev_text.substr(lcp);
+            std::wstring new_tail = pktText.substr(lcp);
+            LogHost("ATOM2", "Segmenter Mutation: '" + WideToUTF8(old_tail) + "' -> '" + WideToUTF8(new_tail) + "' (LCP: " + std::to_string(lcp) + ")");
+        }
+        if (lcp < g_transSegmenter.last_commit_pos) {
+            LogHost("TRANSLATE", "[ATOM2] Danger! Rolling back last_commit_pos from " + 
+                                  std::to_string(g_transSegmenter.last_commit_pos) + " to " + std::to_string(lcp));
+            g_transSegmenter.last_commit_pos = lcp;
+        }
     }
     g_transSegmenter.last_offset = offset;
 
     DWORD64 now = GetTickCount64();
     if (!isFinal) {
         if (pktText.size() > g_transSegmenter.prev_text.size()) {
-            if (g_transSegmenter.last_packet_time > 0) {
-                DWORD64 gap = now - g_transSegmenter.last_packet_time;
-                g_transSegmenter.AddGap(gap);
-            }
             g_transSegmenter.last_packet_time = now;
         } else {
             CheckSilenceTimeoutLocked(now);
@@ -270,6 +319,7 @@ void ProcessTranslationAndSplitting(const std::wstring& pktText, bool isFinal, u
         g_transSegmenter.last_packet_time = now;
     }
     g_transSegmenter.prev_text = pktText;
+    g_transSegmenter.UpdatePacing(pktText, duration);
 
     if (isFinal) {
         std::wstring remaining = pktText.substr(g_transSegmenter.last_commit_pos);
@@ -372,7 +422,7 @@ void CheckSilenceTimeoutLocked(DWORD64 now) {
         if (idle_time > threshold) {
             std::wstring remaining = g_transSegmenter.prev_text.substr(g_transSegmenter.last_commit_pos);
             auto words = Tokenize(remaining);
-            if (words.size() >= 5) {
+            if (!words.empty()) {
                 EmitTranslateCommit(L"soft_silence", remaining, g_transSegmenter.last_offset, 0, now);
                 g_transSegmenter.last_commit_pos = g_transSegmenter.prev_text.size();
                 g_transSegmenter.last_packet_time = 0; // Reset

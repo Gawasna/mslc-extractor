@@ -20,3 +20,5 @@ AGENTS.md
 /scripts
 /docs_OLD_DO_NOT_READ
 TRACE.md
+*.log
+/docs_shared
