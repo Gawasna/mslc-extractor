@@ -637,8 +637,13 @@ int main(int argc, char* argv[]) {
         SetConsoleOutputCP(CP_UTF8);
     }
 
-    // 4. Start Named Pipe Server (Keep joinable for graceful shutdown)
-    std::thread pipeServerThread(PipeListener);
+    // 4. Start Named Pipe Server (inject-only exits immediately; no pipe needed)
+    std::thread pipeServerThread;
+    bool pipeThreadStarted = false;
+    if (!g_injectOnly) {
+        pipeServerThread = std::thread(PipeListener);
+        pipeThreadStarted = true;
+    }
 
     // 5. Start Mock Client Thread if in Mock Mode
     if (g_mockMode) {
@@ -849,7 +854,7 @@ int main(int argc, char* argv[]) {
         CloseHandle(hPipe);
     }
 
-    if (pipeServerThread.joinable()) {
+    if (pipeThreadStarted && pipeServerThread.joinable()) {
         pipeServerThread.join();
     }
     return 0;
