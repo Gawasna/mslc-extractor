@@ -210,6 +210,7 @@ struct PipePacket {
     DWORD64      offset   = 0;
     DWORD64      duration = 0;
     std::wstring result_id;
+    double       pacing_ms = 330.0;
 };
 
 bool ParsePacket(const std::wstring& data, PipePacket& out) {
@@ -240,6 +241,11 @@ bool ParsePacket(const std::wstring& data, PipePacket& out) {
     p = data.find(L"\"duration\":");
     if (p != std::wstring::npos) {
         out.duration = static_cast<DWORD64>(_wtoi64(data.c_str() + p + 11));
+    }
+
+    p = data.find(L"\"pacing_ms\":");
+    if (p != std::wstring::npos) {
+        out.pacing_ms = _wtof(data.c_str() + p + 12);
     }
 
     p = data.find(L"\"result_id\":\"");

@@ -274,10 +274,29 @@ static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_
 
     std::string escaped;
     escaped.reserve(text_bytes);
+    int word_count = 0;
+    bool in_word = false;
+
     for (const char* p = text; *p; ++p) {
         if (*p == '"')  escaped += "\\\"";
         else if (*p == '\\') escaped += "\\\\";
         else            escaped += *p;
+
+        if (isspace(static_cast<unsigned char>(*p))) {
+            in_word = false;
+        } else if (!in_word) {
+            in_word = true;
+            word_count++;
+        }
+    }
+
+    double pacing_ms = 330.0;
+    if (duration > 0 && word_count >= 2) {
+        double duration_ms = static_cast<double>(duration) / 10000.0;
+        double ms_per_word = duration_ms / static_cast<double>(word_count);
+        if (ms_per_word >= 80.0 && ms_per_word <= 1500.0) {
+            pacing_ms = ms_per_word;
+        }
     }
 
     std::ostringstream json;
@@ -288,6 +307,7 @@ static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_
          << ",\"offset\":"   << offset
          << ",\"duration\":" << duration
          << ",\"result_id\":\"" << result_id << "\""
+         << ",\"pacing_ms\":" << std::fixed << std::setprecision(1) << pacing_ms
          << "}\n";
     return json.str();
 }
