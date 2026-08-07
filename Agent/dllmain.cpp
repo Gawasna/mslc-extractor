@@ -13,7 +13,7 @@
 #include <atomic>
 #include "MinHook.h"
 #include <shlobj.h>
-
+#include <unordered_map>
 #pragma comment(lib, "shell32.lib")
 
 // =============================================================
@@ -355,11 +355,77 @@ typedef int(__stdcall* result_get_offset_t)   (SPXRESULTHANDLE hresult, uint64_t
 typedef int(__stdcall* result_get_duration_t) (SPXRESULTHANDLE hresult, uint64_t* pDuration);
 typedef int(__stdcall* result_get_result_id_t)(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
 
+typedef void* SPXRECOHANDLE;
+typedef void* SPXEVENTHANDLE;
+typedef void(__stdcall* PSESSION_CALLBACK_FUNC)(SPXRECOHANDLE hreco, SPXEVENTHANDLE hevent, void* pvContext);
+typedef int(__stdcall* recognizer_session_started_set_callback_t)(SPXRECOHANDLE hreco, PSESSION_CALLBACK_FUNC callback, void* pvContext);
+
 result_get_text_t      fpOriginalResultGetText      = nullptr;
 result_get_reason_t    fpOriginalResultGetReason    = nullptr;
 result_get_offset_t    fpOriginalResultGetOffset    = nullptr;
 result_get_duration_t  fpOriginalResultGetDuration  = nullptr;
 result_get_result_id_t fpOriginalResultGetResultId  = nullptr;
+
+recognizer_session_started_set_callback_t fpOriginalRecognizerSessionStartedSetCallback = nullptr;
+std::mutex g_sessionStartedMutex;
+std::unordered_map<SPXRECOHANDLE, PSESSION_CALLBACK_FUNC> g_sessionStartedCallbacks;
+
+static std::string HandleToHexString(void* handle) {
+    std::ostringstream ss;
+    ss << "0x" << std::hex << std::setw(16) << std::setfill('0') << reinterpret_cast<uint64_t>(handle);
+    return ss.str();
+}
+
+static std::string BuildEventJsonPayload(const std::string& eventName, const std::string& k1, const std::string& v1, const std::string& k2, const std::string& v2) {
+    long long ticks = 0;
+    GetSystemTimePreciseAsFileTime(reinterpret_cast<FILETIME*>(&ticks));
+    std::ostringstream json;
+    json << "{\"event\":\"" << eventName << "\",\"precise_ticks\":" << ticks << ",\"ts_ms\":" << GetTickCount64() << ",\"" << k1 << "\":\"" << v1 << "\",\"" << k2 << "\":\"" << v2 << "\"}\n";
+    return json.str();
+}
+
+static std::atomic<bool> g_sessionStartedEmitted{ false };
+inline void EnsureSessionStartedEmitted(SPXRECOHANDLE hreco = nullptr, SPXEVENTHANDLE hevent = nullptr) {
+    if (!g_sessionStartedEmitted.exchange(true)) {
+        const std::string hrecoStr = hreco ? HandleToHexString(hreco) : "0x0000000000000000";
+        const std::string heventStr = hevent ? HandleToHexString(hevent) : "0x0000000000000000";
+        LogInfo("Auto-emitting session_started event: hreco=" + hrecoStr + ", hevent=" + heventStr);
+        const std::string payload = BuildEventJsonPayload("session_started", "hreco", hrecoStr, "hevent", heventStr);
+        PushToQueue(payload);
+    }
+}
+
+void __stdcall DetourSessionStartedCallback(SPXRECOHANDLE hreco, SPXEVENTHANDLE hevent, void* pvContext) {
+    EnsureSessionStartedEmitted(hreco, hevent);
+    const std::string hrecoStr = HandleToHexString(hreco);
+    const std::string heventStr = HandleToHexString(hevent);
+    LogInfo("DetourSessionStartedCallback called: hreco=" + hrecoStr + ", hevent=" + heventStr);
+
+    const std::string payload = BuildEventJsonPayload("session_started", "hreco", hrecoStr, "hevent", heventStr);
+    PushToQueue(payload);
+
+    PSESSION_CALLBACK_FUNC orig = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_sessionStartedMutex);
+        auto it = g_sessionStartedCallbacks.find(hreco);
+        if (it != g_sessionStartedCallbacks.end()) {
+            orig = it->second;
+        }
+    }
+    if (orig) {
+        orig(hreco, hevent, pvContext);
+    }
+}
+
+int __stdcall Detour_recognizer_session_started_set_callback(SPXRECOHANDLE hreco, PSESSION_CALLBACK_FUNC callback, void* pvContext) {
+    const std::string hrecoStr = HandleToHexString(hreco);
+    LogInfo("recognizer_session_started_set_callback: hreco=" + hrecoStr);
+    {
+        std::lock_guard<std::mutex> lock(g_sessionStartedMutex);
+        g_sessionStartedCallbacks[hreco] = callback;
+    }
+    return fpOriginalRecognizerSessionStartedSetCallback(hreco, DetourSessionStartedCallback, pvContext);
+}
 
 int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen) {
     const int ret = fpOriginalResultGetText(hresult, buffer, bufferLen);
@@ -432,6 +498,7 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
     FARPROC pGetOffset  = GetProcAddress(hCoreDLL, "result_get_offset");
     FARPROC pGetDuration = GetProcAddress(hCoreDLL, "result_get_duration");
     FARPROC pGetResultId = GetProcAddress(hCoreDLL, "result_get_result_id");
+    FARPROC pSessionStartedCallback = GetProcAddress(hCoreDLL, "recognizer_session_started_set_callback");
 
     if (!pGetText) {
         LogError("HookThread: 'result_get_text' export not found.");
@@ -465,6 +532,16 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
     if (pGetResultId) {
         fpOriginalResultGetResultId = reinterpret_cast<result_get_result_id_t>(pGetResultId);
         LogInfo("HookThread: 'result_get_result_id' resolved.");
+    }
+
+    if (pSessionStartedCallback) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pSessionStartedCallback),
+                          &Detour_recognizer_session_started_set_callback,
+                          reinterpret_cast<LPVOID*>(&fpOriginalRecognizerSessionStartedSetCallback)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for recognizer_session_started_set_callback failed.");
+        } else {
+            LogInfo("HookThread: Hook for recognizer_session_started_set_callback created.");
+        }
     }
 
     if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
