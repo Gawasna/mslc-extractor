@@ -12,6 +12,7 @@
 #include <deque>
 #include <atomic>
 #include "MinHook.h"
+#include "HeapScanner.h"
 #include <shlobj.h>
 #include <unordered_map>
 
@@ -275,7 +276,7 @@ DWORD WINAPI SenderThread(LPVOID /*lpParam*/) {
     return 0;
 }
 
-static uint64_t GetPreciseTimeTicks() {
+uint64_t GetPreciseTimeTicks() {
     FILETIME ft;
     GetSystemTimePreciseAsFileTime(&ft);
     return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
@@ -761,7 +762,15 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
         return 0;
     }
 
-    LogInfo("HookThread: Hooks enabled successfully.");
+    LogInfo("HookThread: Hooks enabled successfully. Triggering dynamic heap memory scan...");
+    
+    // Launch heap scan on background worker thread to prevent blocking HookThread
+    CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        Sleep(200);
+        ScanHeapForRecognizerHandle();
+        return 0;
+    }, NULL, 0, NULL);
+
     return 0;
 }
 
