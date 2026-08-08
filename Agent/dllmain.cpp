@@ -14,6 +14,7 @@
 #include "MinHook.h"
 #include <shlobj.h>
 #include <unordered_map>
+#include "HeapScanner.h"
 #pragma comment(lib, "shell32.lib")
 
 // =============================================================
@@ -164,6 +165,12 @@ public:
         return *this;
     }
 };
+
+uint64_t GetPreciseTimeTicks() {
+    uint64_t ticks = 0;
+    GetSystemTimePreciseAsFileTime(reinterpret_cast<FILETIME*>(&ticks));
+    return ticks;
+}
 
 // =============================================================
 // BACKGROUND SENDER THREAD & RING BUFFER (BACKPRESSURE POLICY)
@@ -384,7 +391,7 @@ static std::string BuildEventJsonPayload(const std::string& eventName, const std
     return json.str();
 }
 
-static std::atomic<bool> g_sessionStartedEmitted{ false };
+std::atomic<bool> g_sessionStartedEmitted{ false };
 inline void EnsureSessionStartedEmitted(SPXRECOHANDLE hreco = nullptr, SPXEVENTHANDLE hevent = nullptr) {
     if (!g_sessionStartedEmitted.exchange(true)) {
         const std::string hrecoStr = hreco ? HandleToHexString(hreco) : "0x0000000000000000";
@@ -465,6 +472,21 @@ int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint
     PushToQueue(payload); // Push to background queue, zero latency on target thread
 
     return ret;
+}
+
+// =============================================================
+// HEAP SCANNER THREAD (Late injection fallback)
+// =============================================================
+DWORD WINAPI HeapScannerThread(LPVOID /*lpParam*/) {
+    LogInfo("HeapScannerThread: Started. Waiting 2 seconds before scanning...");
+    Sleep(2000);
+    if (!g_sessionStartedEmitted.load()) {
+        LogInfo("HeapScannerThread: session_started not yet emitted. Scanning heap...");
+        ScanHeapForRecognizerHandle();
+    } else {
+        LogInfo("HeapScannerThread: session_started already emitted via hook. Skipping scan.");
+    }
+    return 0;
 }
 
 // =============================================================
@@ -550,6 +572,10 @@ DWORD WINAPI HookThread(LPVOID lpParam) {
     }
 
     LogInfo("HookThread: Hooks enabled successfully.");
+
+    // Launch Heap Scanner for late injection fallback
+    CreateThread(NULL, 0, HeapScannerThread, NULL, 0, NULL);
+
     return 0;
 }
 
