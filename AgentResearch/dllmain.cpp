@@ -1,0 +1,876 @@
+#include "pch.h"
+#include <Windows.h>
+#include <string>
+#include <fstream>
+#include <vector>
+#include <Psapi.h>
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <atomic>
+#include "MinHook.h"
+#include "HeapScanner.h"
+#include <shlobj.h>
+#include <unordered_map>
+
+#pragma comment(lib, "shell32.lib")
+
+// =============================================================
+// NT INTERNAL DECLARATIONS (for LdrRegisterDllNotification)
+// =============================================================
+typedef LONG NTSTATUS;
+
+#ifndef NTAPI
+#define NTAPI __stdcall
+#endif
+
+typedef struct _UNICODE_STRING {
+    USHORT Length;
+    USHORT MaximumLength;
+    PWSTR  Buffer;
+} UNICODE_STRING, *PUNICODE_STRING;
+
+typedef const UNICODE_STRING* PCUNICODE_STRING;
+
+typedef struct _LDR_DLL_NOTIFICATION_DATA {
+    ULONG Flags;
+    PCUNICODE_STRING FullDllName;
+    PCUNICODE_STRING BaseDllName;
+    PVOID DllBase;
+    ULONG SizeOfImage;
+} LDR_DLL_NOTIFICATION_DATA, *PLDR_DLL_NOTIFICATION_DATA;
+
+typedef VOID (NTAPI *PLDR_DLL_NOTIFICATION_FUNCTION)(
+    ULONG NotificationReason,
+    PLDR_DLL_NOTIFICATION_DATA NotificationData,
+    PVOID Context
+);
+
+typedef NTSTATUS (NTAPI *PLDR_REGISTER_DLL_NOTIFICATION)(
+    ULONG Flags,
+    PLDR_DLL_NOTIFICATION_FUNCTION NotificationFunction,
+    PVOID Context,
+    PVOID *Cookie
+);
+
+typedef NTSTATUS (NTAPI *PLDR_UNREGISTER_DLL_NOTIFICATION)(
+    PVOID Cookie
+);
+
+#define LDR_DLL_NOTIFICATION_REASON_LOADED 1
+
+// =============================================================
+// CONSTANTS
+// =============================================================
+static constexpr const wchar_t* PIPE_NAME  = L"\\\\.\\pipe\\LiveCaptionPipeResearch";
+static constexpr size_t QUEUE_MAX_SIZE      = 100;
+
+static HMODULE g_hModule = NULL;
+static std::string g_logPath = "";
+static std::mutex g_logMutex;
+
+// Helper to get workspace/logs path for logging
+std::string GetLogPath() {
+    wchar_t path[MAX_PATH];
+    if (GetModuleFileNameW(g_hModule, path, MAX_PATH)) {
+        std::wstring wPath(path);
+        size_t pos = wPath.find_last_of(L"\\");
+        if (pos != std::wstring::npos) {
+            std::wstring dir = wPath.substr(0, pos); // Thư mục chứa dll
+            if (dir.find(L"x64\\Release") != std::wstring::npos || dir.find(L"x64\\Debug") != std::wstring::npos) {
+                pos = dir.find_last_of(L"\\");
+                if (pos != std::wstring::npos) {
+                    std::wstring root = dir.substr(0, pos);
+                    pos = root.find_last_of(L"\\");
+                    if (pos != std::wstring::npos) {
+                        std::wstring projectRoot = root.substr(0, pos);
+                        std::wstring logFile = projectRoot + L"\\logs\\mslc_agent_research.log";
+                        return std::string(logFile.begin(), logFile.end());
+                    }
+                }
+            } else {
+                std::wstring logFile = dir + L"\\logs\\mslc_agent_research.log";
+                return std::string(logFile.begin(), logFile.end());
+            }
+        }
+    }
+    return "C:\\Users\\Public\\mslc_agent_research.log"; // Fallback
+}
+
+// =============================================================
+// STRUCTURED LOGGER (Thread-Safe)
+// =============================================================
+void LogToFile(const char* level, const std::string& msg) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+
+    std::ostringstream entry;
+    entry << '['
+          << std::setfill('0')
+          << std::setw(4) << st.wYear  << '-'
+          << std::setw(2) << st.wMonth << '-'
+          << std::setw(2) << st.wDay   << 'T'
+          << std::setw(2) << st.wHour  << ':'
+          << std::setw(2) << st.wMinute << ':'
+          << std::setw(2) << st.wSecond
+          << "] ["
+          << level
+          << "] [Agent] "
+          << msg;
+
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    std::ofstream logFile(g_logPath, std::ios_base::app);
+    if (logFile.is_open()) {
+        logFile << entry.str() << '\n';
+    }
+}
+
+
+inline void LogInfo (const std::string& m) { LogToFile("INFO ", m); }
+inline void LogWarn (const std::string& m) { LogToFile("WARN ", m); }
+inline void LogError(const std::string& m) { LogToFile("ERROR", m); }
+inline void LogFatal(const std::string& m) { LogToFile("FATAL", m); }
+
+// =============================================================
+// RAII WRAPPER FOR WINDOWS API HANDLES
+// =============================================================
+class SafeHandle {
+    HANDLE m_handle;
+public:
+    explicit SafeHandle(HANDLE h = INVALID_HANDLE_VALUE) : m_handle(h) {}
+    ~SafeHandle() { Close(); }
+
+    void Close() {
+        if (m_handle != INVALID_HANDLE_VALUE && m_handle != NULL) {
+            CloseHandle(m_handle);
+            m_handle = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    HANDLE Get() const { return m_handle; }
+    void Set(HANDLE h) { Close(); m_handle = h; }
+    bool IsValid() const { return m_handle != INVALID_HANDLE_VALUE && m_handle != NULL; }
+
+    SafeHandle(const SafeHandle&) = delete;
+    SafeHandle& operator=(const SafeHandle&) = delete;
+    SafeHandle(SafeHandle&& other) noexcept : m_handle(other.m_handle) { other.m_handle = INVALID_HANDLE_VALUE; }
+    SafeHandle& operator=(SafeHandle&& other) noexcept {
+        if (this != &other) {
+            Close();
+            m_handle = other.m_handle;
+            other.m_handle = INVALID_HANDLE_VALUE;
+        }
+        return *this;
+    }
+};
+
+// =============================================================
+// BACKGROUND SENDER THREAD & RING BUFFER (BACKPRESSURE POLICY)
+// =============================================================
+static HANDLE                  g_hPipe      = INVALID_HANDLE_VALUE;
+static std::deque<std::string> g_sendQueue;
+static std::mutex              g_queueMutex;
+static std::condition_variable g_queueCv;
+static std::atomic<bool>       g_exitSender{false};
+static SafeHandle              g_hSenderThread;
+
+void PushToQueue(const std::string& payload) {
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    
+    // Backpressure Handling: if queue is full, drop oldest packets to prevent memory bloat
+    if (g_sendQueue.size() >= QUEUE_MAX_SIZE) {
+        g_sendQueue.pop_front();
+    }
+    g_sendQueue.push_back(payload);
+    g_queueCv.notify_one();
+}
+
+DWORD WINAPI SenderThread(LPVOID /*lpParam*/) {
+    LogInfo("SenderThread: Started.");
+    int retryCount = 0;
+
+    while (!g_exitSender) {
+        std::string payload;
+
+        {
+            std::unique_lock<std::mutex> lock(g_queueMutex);
+            g_queueCv.wait(lock, [] { return !g_sendQueue.empty() || g_exitSender; });
+
+            if (g_exitSender && g_sendQueue.empty()) {
+                break;
+            }
+
+            payload = g_sendQueue.front();
+            g_sendQueue.pop_front();
+        }
+
+        bool sent = false;
+        while (!sent && !g_exitSender) {
+            // Lazy connect
+            if (g_hPipe == INVALID_HANDLE_VALUE) {
+                g_hPipe = CreateFileW(
+                    PIPE_NAME,
+                    GENERIC_WRITE,
+                    0,
+                    NULL,
+                    OPEN_EXISTING,
+                    0, // Synchronous writing is safe on this dedicated thread
+                    NULL
+                );
+
+                if (g_hPipe != INVALID_HANDLE_VALUE) {
+                    LogInfo("SenderThread: Named Pipe connected successfully.");
+                    retryCount = 0; // Reset backoff
+                } else {
+                    DWORD err = GetLastError();
+                    // Smart Backoff (Exponential Backoff with Jitter)
+                    retryCount = (std::min)(retryCount + 1, 2); // Max delay ~4s
+                    int backoffMs = (1 << retryCount) * 1000;
+                    
+                    // Simple Jitter (0-500ms) using system tick to avoid Sonar cpp:S2245 (Weak Cryptography)
+                    int jitter = static_cast<int>(GetTickCount64() % 500);
+                    backoffMs += jitter;
+
+                    LogWarn("SenderThread: Connection failed (err=" + std::to_string(err) + 
+                            "). Backing off for " + std::to_string(backoffMs) + "ms");
+
+                    int sleepRemain = backoffMs;
+                    while (sleepRemain > 0 && !g_exitSender) {
+                        int chunk = (std::min)(sleepRemain, 200);
+                        Sleep(chunk);
+                        sleepRemain -= chunk;
+                    }
+                    continue; // Retry connection
+                }
+            }
+
+            DWORD written = 0;
+            BOOL ok = WriteFile(
+                g_hPipe,
+                payload.c_str(),
+                static_cast<DWORD>(payload.size()),
+                &written,
+                NULL
+            );
+
+            if (ok) {
+                sent = true;
+            } else {
+                DWORD err = GetLastError();
+                LogWarn("SenderThread: Write failed (err=" + std::to_string(err) + "). Resetting pipe handle.");
+                CloseHandle(g_hPipe);
+                g_hPipe = INVALID_HANDLE_VALUE;
+            }
+        }
+    }
+
+    if (g_hPipe != INVALID_HANDLE_VALUE) {
+        CloseHandle(g_hPipe);
+        g_hPipe = INVALID_HANDLE_VALUE;
+    }
+
+    LogInfo("SenderThread: Exiting.");
+    return 0;
+}
+
+uint64_t GetPreciseTimeTicks() {
+    FILETIME ft;
+    GetSystemTimePreciseAsFileTime(&ft);
+    return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+}
+
+static std::string HandleToHexString(void* handle) {
+    std::ostringstream ss;
+    ss << "0x" << std::hex << std::setfill('0') << std::setw(16) << reinterpret_cast<uintptr_t>(handle);
+    return ss.str();
+}
+
+static std::string BuildEventJsonPayload(const std::string& eventType, const std::string& key1, const std::string& val1, const std::string& key2 = "", const std::string& val2 = "", const std::string& key3 = "", uint64_t val3 = 0) {
+    std::ostringstream json;
+    json << "{\"event\":\"" << eventType << "\""
+         << ",\"precise_ticks\":" << GetPreciseTimeTicks()
+         << ",\"ts_ms\":" << GetTickCount64()
+         << ",\"" << key1 << "\":\"" << val1 << "\"";
+    if (!key2.empty()) {
+        json << ",\"" << key2 << "\":\"" << val2 << "\"";
+    }
+    if (!key3.empty()) {
+        json << ",\"" << key3 << "\":" << val3;
+    }
+    json << "}\n";
+    return json.str();
+}
+
+// Build JSON payload inline to avoid heap allocations on hot path
+static std::string BuildJsonPayload(const char* text, bool is_final, DWORD64 ts_ms, uint64_t offset, uint64_t duration, const char* result_id) {
+    const size_t text_bytes = strlen(text);
+
+    std::string escaped;
+    escaped.reserve(text_bytes);
+    for (const char* p = text; *p; ++p) {
+        if (*p == '"')  escaped += "\\\"";
+        else if (*p == '\\') escaped += "\\\\";
+        else            escaped += *p;
+    }
+
+    std::ostringstream json;
+    json << "{\"event\":\"caption\""
+         << ",\"text\":\""   << escaped
+         << "\",\"is_final\":"  << (is_final ? "true" : "false")
+         << ",\"bytes\":"    << text_bytes
+         << ",\"ts_ms\":"    << ts_ms
+         << ",\"precise_ticks\":" << GetPreciseTimeTicks()
+         << ",\"offset\":"   << offset
+         << ",\"duration\":" << duration
+         << ",\"result_id\":\"" << result_id << "\""
+         << "}\n";
+    return json.str();
+}
+
+// =============================================================
+// HELPER: FIND MODULE BY PARTIAL NAME (Dynamic Scan)
+// =============================================================
+HMODULE FindModuleByPartialName(const std::string& partialName) {
+    HANDLE hProcess = GetCurrentProcess();
+    DWORD cbNeeded  = 0;
+
+    EnumProcessModules(hProcess, nullptr, 0, &cbNeeded);
+    if (cbNeeded == 0) return nullptr;
+
+    std::vector<HMODULE> hMods(cbNeeded / sizeof(HMODULE));
+    if (!EnumProcessModules(hProcess, hMods.data(), cbNeeded, &cbNeeded)) {
+        return nullptr;
+    }
+
+    std::string partialLower = partialName;
+    std::transform(partialLower.begin(), partialLower.end(), partialLower.begin(), ::tolower);
+
+    for (HMODULE hMod : hMods) {
+        TCHAR szModName[MAX_PATH] = {};
+        if (!GetModuleFileNameEx(hProcess, hMod, szModName, MAX_PATH)) continue;
+
+        std::wstring wName(szModName);
+        std::string  sName;
+        sName.reserve(wName.size());
+        for (wchar_t wc : wName) {
+            sName.push_back(static_cast<char>(wc));
+        }
+        std::transform(sName.begin(), sName.end(), sName.begin(), ::tolower);
+
+        if (sName.find(partialLower) != std::string::npos) {
+            return hMod;
+        }
+    }
+    return nullptr;
+}
+
+// =============================================================
+// SPEECH SDK TYPES & HOOKS
+// =============================================================
+typedef void*  SPXRESULTHANDLE;
+typedef void*  SPXRECOHANDLE;
+typedef void*  SPXEVENTHANDLE;
+
+enum Result_Reason : int {
+    ResultReason_NoMatch           = 0,
+    ResultReason_Canceled          = 1,
+    ResultReason_RecognizingSpeech = 2,
+    ResultReason_RecognizedSpeech  = 3,
+    ResultReason_TranslatingSpeech = 6,
+    ResultReason_TranslatedSpeech  = 7,
+};
+
+typedef void(__stdcall* PSESSION_CALLBACK_FUNC)(SPXRECOHANDLE hreco, SPXEVENTHANDLE hevent, void* pvContext);
+
+typedef int(__stdcall* result_get_text_t)     (SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
+typedef int(__stdcall* result_get_reason_t)   (SPXRESULTHANDLE hresult, int*  pReason);
+typedef int(__stdcall* result_get_offset_t)   (SPXRESULTHANDLE hresult, uint64_t* pOffset);
+typedef int(__stdcall* result_get_duration_t) (SPXRESULTHANDLE hresult, uint64_t* pDuration);
+typedef int(__stdcall* result_get_result_id_t)(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen);
+
+typedef int(__stdcall* recognizer_speech_start_detected_set_callback_t)(SPXRECOHANDLE hreco, PSESSION_CALLBACK_FUNC callback, void* pvContext);
+typedef int(__stdcall* recognizer_session_started_set_callback_t)(SPXRECOHANDLE hreco, PSESSION_CALLBACK_FUNC callback, void* pvContext);
+typedef int(__stdcall* recognizer_recognition_event_get_offset_t)(SPXEVENTHANDLE hevent, uint64_t* pOffset);
+typedef int(__stdcall* recognizer_recognition_event_get_result_t)(SPXEVENTHANDLE hevent, SPXRESULTHANDLE* phresult);
+
+result_get_text_t      fpOriginalResultGetText      = nullptr;
+result_get_reason_t    fpOriginalResultGetReason    = nullptr;
+result_get_offset_t    fpOriginalResultGetOffset    = nullptr;
+result_get_duration_t  fpOriginalResultGetDuration  = nullptr;
+result_get_result_id_t fpOriginalResultGetResultId  = nullptr;
+
+recognizer_speech_start_detected_set_callback_t fpOriginalRecognizerSpeechStartDetectedSetCallback = nullptr;
+recognizer_session_started_set_callback_t       fpOriginalRecognizerSessionStartedSetCallback       = nullptr;
+recognizer_recognition_event_get_offset_t       fpOriginalRecognizerRecognitionEventGetOffset       = nullptr;
+recognizer_recognition_event_get_result_t       fpOriginalRecognizerRecognitionEventGetResult       = nullptr;
+
+std::mutex g_speechStartMutex;
+std::unordered_map<SPXRECOHANDLE, PSESSION_CALLBACK_FUNC> g_speechStartCallbacks;
+
+std::mutex g_sessionStartedMutex;
+std::unordered_map<SPXRECOHANDLE, PSESSION_CALLBACK_FUNC> g_sessionStartedCallbacks;
+
+static std::atomic<bool> g_sessionStartedEmitted{ false };
+
+inline void EnsureSessionStartedEmitted(SPXRECOHANDLE hreco = nullptr, SPXEVENTHANDLE hevent = nullptr) {
+    if (!g_sessionStartedEmitted.exchange(true)) {
+        const std::string hrecoStr = hreco ? HandleToHexString(hreco) : "0x0000000000000000";
+        const std::string heventStr = hevent ? HandleToHexString(hevent) : "0x0000000000000000";
+        LogInfo("Auto-emitting session_started event: hreco=" + hrecoStr + ", hevent=" + heventStr);
+        const std::string payload = BuildEventJsonPayload("session_started", "hreco", hrecoStr, "hevent", heventStr);
+        PushToQueue(payload);
+    }
+}
+
+static std::mutex g_speechStateMutex;
+static bool g_speechStartDetectedForCurrentPhrase = false;
+static std::string g_currentResultId = "";
+
+inline void EnsureSpeechStartEmitted(SPXRECOHANDLE hreco = nullptr, SPXEVENTHANDLE hevent = nullptr) {
+    std::lock_guard<std::mutex> lock(g_speechStateMutex);
+    if (!g_speechStartDetectedForCurrentPhrase) {
+        g_speechStartDetectedForCurrentPhrase = true;
+        const std::string hrecoStr = hreco ? HandleToHexString(hreco) : "0x0000000000000000";
+        const std::string heventStr = hevent ? HandleToHexString(hevent) : "0x0000000000000000";
+        LogInfo("Auto-emitting speech_start_detected event: hreco=" + hrecoStr + ", hevent=" + heventStr);
+        const std::string payload = BuildEventJsonPayload("speech_start_detected", "hreco", hrecoStr, "hevent", heventStr);
+        PushToQueue(payload);
+    }
+}
+
+inline void UpdateSpeechStateOnText(const char* resultId, bool is_final) {
+    std::lock_guard<std::mutex> lock(g_speechStateMutex);
+    std::string resIdStr = resultId ? resultId : "";
+    if (!g_speechStartDetectedForCurrentPhrase || (!resIdStr.empty() && !g_currentResultId.empty() && g_currentResultId != resIdStr)) {
+        g_speechStartDetectedForCurrentPhrase = true;
+        g_currentResultId = resIdStr;
+        LogInfo("Auto-emitting speech_start_detected on resultId: " + resIdStr);
+        const std::string payload = BuildEventJsonPayload("speech_start_detected", "hreco", "0x0000000000000000", "hevent", "0x0000000000000000");
+        PushToQueue(payload);
+    } else if (resIdStr.empty() && !g_speechStartDetectedForCurrentPhrase) {
+        g_speechStartDetectedForCurrentPhrase = true;
+        const std::string payload = BuildEventJsonPayload("speech_start_detected", "hreco", "0x0000000000000000", "hevent", "0x0000000000000000");
+        PushToQueue(payload);
+    }
+
+    if (is_final) {
+        g_speechStartDetectedForCurrentPhrase = false;
+        g_currentResultId.clear();
+    }
+}
+
+void __stdcall DetourSpeechStartCallback(SPXRECOHANDLE hreco, SPXEVENTHANDLE hevent, void* pvContext) {
+    EnsureSessionStartedEmitted(hreco, hevent);
+    {
+        std::lock_guard<std::mutex> lock(g_speechStateMutex);
+        g_speechStartDetectedForCurrentPhrase = true;
+    }
+    const std::string hrecoStr = HandleToHexString(hreco);
+    const std::string heventStr = HandleToHexString(hevent);
+    LogInfo("DetourSpeechStartCallback called: hreco=" + hrecoStr + ", hevent=" + heventStr);
+    
+    const std::string payload = BuildEventJsonPayload("speech_start_detected", "hreco", hrecoStr, "hevent", heventStr);
+    PushToQueue(payload);
+
+    PSESSION_CALLBACK_FUNC orig = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_speechStartMutex);
+        auto it = g_speechStartCallbacks.find(hreco);
+        if (it != g_speechStartCallbacks.end()) {
+            orig = it->second;
+        }
+    }
+    if (orig) {
+        orig(hreco, hevent, pvContext);
+    }
+}
+
+int __stdcall Detour_recognizer_speech_start_detected_set_callback(SPXRECOHANDLE hreco, PSESSION_CALLBACK_FUNC callback, void* pvContext) {
+    const std::string hrecoStr = HandleToHexString(hreco);
+    const std::string cbStr = HandleToHexString(reinterpret_cast<void*>(callback));
+    LogInfo("recognizer_speech_start_detected_set_callback: hreco=" + hrecoStr + ", callback=" + cbStr);
+
+    {
+        std::lock_guard<std::mutex> lock(g_speechStartMutex);
+        g_speechStartCallbacks[hreco] = callback;
+    }
+    return fpOriginalRecognizerSpeechStartDetectedSetCallback(hreco, DetourSpeechStartCallback, pvContext);
+}
+
+void __stdcall DetourSessionStartedCallback(SPXRECOHANDLE hreco, SPXEVENTHANDLE hevent, void* pvContext) {
+    EnsureSessionStartedEmitted(hreco, hevent);
+    const std::string hrecoStr = HandleToHexString(hreco);
+    const std::string heventStr = HandleToHexString(hevent);
+    LogInfo("DetourSessionStartedCallback called: hreco=" + hrecoStr + ", hevent=" + heventStr);
+
+    const std::string payload = BuildEventJsonPayload("session_started", "hreco", hrecoStr, "hevent", heventStr);
+    PushToQueue(payload);
+
+    PSESSION_CALLBACK_FUNC orig = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_sessionStartedMutex);
+        auto it = g_sessionStartedCallbacks.find(hreco);
+        if (it != g_sessionStartedCallbacks.end()) {
+            orig = it->second;
+        }
+    }
+    if (orig) {
+        orig(hreco, hevent, pvContext);
+    }
+}
+
+int __stdcall Detour_recognizer_session_started_set_callback(SPXRECOHANDLE hreco, PSESSION_CALLBACK_FUNC callback, void* pvContext) {
+    const std::string hrecoStr = HandleToHexString(hreco);
+    const std::string cbStr = HandleToHexString(reinterpret_cast<void*>(callback));
+    LogInfo("recognizer_session_started_set_callback: hreco=" + hrecoStr + ", callback=" + cbStr);
+
+    {
+        std::lock_guard<std::mutex> lock(g_sessionStartedMutex);
+        g_sessionStartedCallbacks[hreco] = callback;
+    }
+    return fpOriginalRecognizerSessionStartedSetCallback(hreco, DetourSessionStartedCallback, pvContext);
+}
+
+int __stdcall Detour_recognizer_recognition_event_get_offset(SPXEVENTHANDLE hevent, uint64_t* pOffset) {
+    EnsureSessionStartedEmitted(nullptr, hevent);
+    EnsureSpeechStartEmitted(nullptr, hevent);
+    int ret = fpOriginalRecognizerRecognitionEventGetOffset(hevent, pOffset);
+    if (ret == 0 && pOffset != nullptr) {
+        const std::string heventStr = HandleToHexString(hevent);
+        LogInfo("recognizer_recognition_event_get_offset: hevent=" + heventStr + ", offset=" + std::to_string(*pOffset));
+        
+        const std::string payload = BuildEventJsonPayload("recognition_event_offset", "hevent", heventStr, "", "", "offset", *pOffset);
+        PushToQueue(payload);
+    }
+    return ret;
+}
+
+int __stdcall Detour_recognizer_recognition_event_get_result(SPXEVENTHANDLE hevent, SPXRESULTHANDLE* phresult) {
+    EnsureSessionStartedEmitted(nullptr, hevent);
+    EnsureSpeechStartEmitted(nullptr, hevent);
+    int ret = fpOriginalRecognizerRecognitionEventGetResult(hevent, phresult);
+    if (ret == 0 && phresult != nullptr) {
+        const std::string heventStr = HandleToHexString(hevent);
+        const std::string hresultStr = HandleToHexString(*phresult);
+        LogInfo("recognizer_recognition_event_get_result: hevent=" + heventStr + ", hresult=" + hresultStr);
+        
+        const std::string payload = BuildEventJsonPayload("recognition_event_result", "hevent", heventStr, "hresult", hresultStr);
+        PushToQueue(payload);
+    }
+    return ret;
+}
+
+int __stdcall Detour_result_get_offset(SPXRESULTHANDLE hresult, uint64_t* pOffset) {
+    EnsureSessionStartedEmitted();
+    EnsureSpeechStartEmitted();
+    int ret = fpOriginalResultGetOffset(hresult, pOffset);
+    if (ret == 0 && pOffset != nullptr) {
+        const std::string hresultStr = HandleToHexString(hresult);
+        LogInfo("result_get_offset detour called: hresult=" + hresultStr + ", offset=" + std::to_string(*pOffset));
+        
+        const std::string payload = BuildEventJsonPayload("result_offset", "hresult", hresultStr, "", "", "offset", *pOffset);
+        PushToQueue(payload);
+    }
+    return ret;
+}
+
+int __stdcall Detour_result_get_duration(SPXRESULTHANDLE hresult, uint64_t* pDuration) {
+    EnsureSessionStartedEmitted();
+    EnsureSpeechStartEmitted();
+    int ret = fpOriginalResultGetDuration(hresult, pDuration);
+    if (ret == 0 && pDuration != nullptr) {
+        const std::string hresultStr = HandleToHexString(hresult);
+        LogInfo("result_get_duration detour called: hresult=" + hresultStr + ", duration=" + std::to_string(*pDuration));
+        
+        const std::string payload = BuildEventJsonPayload("result_duration", "hresult", hresultStr, "", "", "duration", *pDuration);
+        PushToQueue(payload);
+    }
+    return ret;
+}
+
+int __stdcall Detour_result_get_text(SPXRESULTHANDLE hresult, char* buffer, uint32_t bufferLen) {
+    EnsureSessionStartedEmitted();
+    const int ret = fpOriginalResultGetText(hresult, buffer, bufferLen);
+
+    if (ret != 0 || buffer == nullptr || buffer[0] == '\0') return ret;
+
+    int reason   = ResultReason_RecognizingSpeech;
+    bool is_final = false;
+
+    if (fpOriginalResultGetReason != nullptr) {
+        if (fpOriginalResultGetReason(hresult, &reason) == 0) {
+            is_final = (reason == ResultReason_RecognizedSpeech);
+        }
+    }
+
+    uint64_t offset = 0;
+    uint64_t duration = 0;
+    char resultId[128] = { 0 };
+
+    if (fpOriginalResultGetOffset != nullptr) {
+        fpOriginalResultGetOffset(hresult, &offset);
+    }
+    if (fpOriginalResultGetDuration != nullptr) {
+        fpOriginalResultGetDuration(hresult, &duration);
+    }
+    if (fpOriginalResultGetResultId != nullptr) {
+        fpOriginalResultGetResultId(hresult, resultId, sizeof(resultId));
+    }
+
+    UpdateSpeechStateOnText(resultId, is_final);
+
+    const DWORD64 ts_ms = GetTickCount64();
+
+    LogInfo(std::string(is_final ? "FINAL: " : "PARTIAL: ") + buffer + 
+            " (Id: " + resultId + ", Offset: " + std::to_string(offset) + 
+            ", Duration: " + std::to_string(duration) + ")");
+
+    const std::string payload = BuildJsonPayload(buffer, is_final, ts_ms, offset, duration, resultId);
+    PushToQueue(payload); // Push to background queue, zero latency on target thread
+
+    return ret;
+}
+
+// =============================================================
+// HOOK INSTALLATION THREAD (Safe environment outside Windows Loader Lock)
+// =============================================================
+DWORD WINAPI HookThread(LPVOID lpParam) {
+    // Yield execution to allow DLL loading thread to complete DllMain and exit Windows Loader Lock
+    Sleep(100);
+    HMODULE hCoreDLL = reinterpret_cast<HMODULE>(lpParam);
+    
+    if (hCoreDLL == nullptr) {
+        // Obfuscate module name
+        char p1[] = { 'm','i','c','r','o','s','o','f','t','.',0 };
+        char p2[] = { 'c','o','g','n','i','t','i','v','e','s','e','r','v','i','c','e','s','.',0 };
+        char p3[] = { 's','p','e','e','c','h','.',0 };
+        char p4[] = { 'c','o','r','e','.',0 };
+        char p5[] = { 'd','l','l',0 };
+        std::string targetDll = std::string(p1) + p2 + p3 + p4 + p5;
+
+        hCoreDLL = FindModuleByPartialName(targetDll);
+    }
+
+    if (hCoreDLL == nullptr) {
+        LogError("HookThread: Core DLL not found.");
+        return 0;
+    }
+
+    LogInfo("HookThread: Core DLL found. Resolving exports...");
+    FARPROC pGetText   = GetProcAddress(hCoreDLL, "result_get_text");
+    FARPROC pGetReason = GetProcAddress(hCoreDLL, "result_get_reason");
+    FARPROC pGetOffset  = GetProcAddress(hCoreDLL, "result_get_offset");
+    FARPROC pGetDuration = GetProcAddress(hCoreDLL, "result_get_duration");
+    FARPROC pGetResultId = GetProcAddress(hCoreDLL, "result_get_result_id");
+
+    FARPROC pSpeechStartCallback = GetProcAddress(hCoreDLL, "recognizer_speech_start_detected_set_callback");
+    FARPROC pSessionStartedCallback = GetProcAddress(hCoreDLL, "recognizer_session_started_set_callback");
+    FARPROC pEventGetOffset = GetProcAddress(hCoreDLL, "recognizer_recognition_event_get_offset");
+    FARPROC pEventGetResult = GetProcAddress(hCoreDLL, "recognizer_recognition_event_get_result");
+
+    if (!pGetText) {
+        LogError("HookThread: 'result_get_text' export not found.");
+        return 0;
+    }
+
+    if (MH_Initialize() != MH_OK) {
+        LogError("HookThread: MH_Initialize failed.");
+        return 0;
+    }
+
+    if (MH_CreateHook(reinterpret_cast<LPVOID>(pGetText),
+                      &Detour_result_get_text,
+                      reinterpret_cast<LPVOID*>(&fpOriginalResultGetText)) != MH_OK) {
+        LogError("HookThread: MH_CreateHook for result_get_text failed.");
+        return 0;
+    }
+
+    if (pSpeechStartCallback) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pSpeechStartCallback),
+                          &Detour_recognizer_speech_start_detected_set_callback,
+                          reinterpret_cast<LPVOID*>(&fpOriginalRecognizerSpeechStartDetectedSetCallback)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for recognizer_speech_start_detected_set_callback failed.");
+        } else {
+            LogInfo("HookThread: Hook for recognizer_speech_start_detected_set_callback created.");
+        }
+    }
+
+    if (pSessionStartedCallback) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pSessionStartedCallback),
+                          &Detour_recognizer_session_started_set_callback,
+                          reinterpret_cast<LPVOID*>(&fpOriginalRecognizerSessionStartedSetCallback)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for recognizer_session_started_set_callback failed.");
+        } else {
+            LogInfo("HookThread: Hook for recognizer_session_started_set_callback created.");
+        }
+    }
+
+    if (pEventGetOffset) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pEventGetOffset),
+                          &Detour_recognizer_recognition_event_get_offset,
+                          reinterpret_cast<LPVOID*>(&fpOriginalRecognizerRecognitionEventGetOffset)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for recognizer_recognition_event_get_offset failed.");
+        } else {
+            LogInfo("HookThread: Hook for recognizer_recognition_event_get_offset created.");
+        }
+    }
+
+    if (pEventGetResult) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pEventGetResult),
+                          &Detour_recognizer_recognition_event_get_result,
+                          reinterpret_cast<LPVOID*>(&fpOriginalRecognizerRecognitionEventGetResult)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for recognizer_recognition_event_get_result failed.");
+        } else {
+            LogInfo("HookThread: Hook for recognizer_recognition_event_get_result created.");
+        }
+    }
+
+    if (pGetOffset) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pGetOffset),
+                          &Detour_result_get_offset,
+                          reinterpret_cast<LPVOID*>(&fpOriginalResultGetOffset)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for result_get_offset failed.");
+        } else {
+            LogInfo("HookThread: Hook for result_get_offset created.");
+        }
+    }
+
+    if (pGetDuration) {
+        if (MH_CreateHook(reinterpret_cast<LPVOID>(pGetDuration),
+                          &Detour_result_get_duration,
+                          reinterpret_cast<LPVOID*>(&fpOriginalResultGetDuration)) != MH_OK) {
+            LogError("HookThread: MH_CreateHook for result_get_duration failed.");
+        } else {
+            LogInfo("HookThread: Hook for result_get_duration created.");
+        }
+    }
+
+    if (pGetReason) {
+        fpOriginalResultGetReason = reinterpret_cast<result_get_reason_t>(pGetReason);
+        LogInfo("HookThread: 'result_get_reason' resolved.");
+    }
+    if (pGetResultId) {
+        fpOriginalResultGetResultId = reinterpret_cast<result_get_result_id_t>(pGetResultId);
+        LogInfo("HookThread: 'result_get_result_id' resolved.");
+    }
+
+    if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
+        LogError("HookThread: MH_EnableHook failed.");
+        return 0;
+    }
+
+    LogInfo("HookThread: Hooks enabled successfully. Triggering dynamic heap memory scan...");
+    
+    // Launch heap scan on background worker thread to prevent blocking HookThread
+    CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        Sleep(200);
+        ScanHeapForRecognizerHandle();
+        return 0;
+    }, NULL, 0, NULL);
+
+    return 0;
+}
+
+// =============================================================
+// ZERO-INVASIVE DLL NOTIFICATION CALLBACK
+// =============================================================
+static PVOID g_ldrCookie = nullptr;
+static std::atomic<bool> g_hookInstalled{false};
+
+VOID NTAPI DllNotificationCallback(ULONG NotificationReason, PLDR_DLL_NOTIFICATION_DATA NotificationData, PVOID /*Context*/) {
+    if (NotificationReason == LDR_DLL_NOTIFICATION_REASON_LOADED) {
+        if (NotificationData && NotificationData->BaseDllName && NotificationData->BaseDllName->Buffer) {
+            std::wstring dllName(NotificationData->BaseDllName->Buffer, NotificationData->BaseDllName->Length / sizeof(wchar_t));
+            std::transform(dllName.begin(), dllName.end(), dllName.begin(), ::tolower);
+            
+            if (dllName.find(L"microsoft.cognitiveservices.speech.core.dll") != std::wstring::npos) {
+                if (!g_hookInstalled.exchange(true)) {
+                    LogInfo("DllNotification: Target DLL loaded. Launching HookThread.");
+                    // Start hook thread outside of Windows Loader Lock
+                    CreateThread(NULL, 0, HookThread, NotificationData->DllBase, 0, NULL);
+                }
+            }
+        }
+    }
+}
+
+// =============================================================
+// DLL ENTRY POINT
+// =============================================================
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpReserved*/) {
+    if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
+        g_hModule = hModule;
+        g_logPath = GetLogPath();
+
+        DisableThreadLibraryCalls(hModule);
+
+        // Truncate log file at session start
+        {
+            std::ofstream logFile(g_logPath, std::ios_base::trunc);
+            logFile << "[Agent] === New Session Started ===\n";
+        }
+
+        LogInfo("DllMain: DLL_PROCESS_ATTACH.");
+
+        // Start background sender thread
+        g_hSenderThread.Set(CreateThread(NULL, 0, SenderThread, NULL, 0, NULL));
+
+        // Register DLL notification to hook dynamically without active scanning
+        HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+        if (hNtDll) {
+            auto pLdrRegisterDllNotification = reinterpret_cast<PLDR_REGISTER_DLL_NOTIFICATION>(
+                GetProcAddress(hNtDll, "LdrRegisterDllNotification")
+            );
+            if (pLdrRegisterDllNotification) {
+                pLdrRegisterDllNotification(0, DllNotificationCallback, NULL, &g_ldrCookie);
+                LogInfo("DllMain: Registered DLL notification callback.");
+            }
+        }
+
+        // Edge case: DLL might be already loaded before we registered the callback
+        char p1[] = { 'm','i','c','r','o','s','o','f','t','.',0 };
+        char p2[] = { 'c','o','g','n','i','t','i','v','e','s','e','r','v','i','c','e','s','.',0 };
+        char p3[] = { 's','p','e','e','c','h','.',0 };
+        char p4[] = { 'c','o','r','e','.',0 };
+        char p5[] = { 'd','l','l',0 };
+        std::string targetDll = std::string(p1) + p2 + p3 + p4 + p5;
+
+        HMODULE hCoreDLL = FindModuleByPartialName(targetDll);
+        if (hCoreDLL != nullptr) {
+            if (!g_hookInstalled.exchange(true)) {
+                LogInfo("DllMain: Core DLL already loaded. Launching HookThread.");
+                CreateThread(NULL, 0, HookThread, hCoreDLL, 0, NULL);
+            }
+        }
+    }
+    else if (ul_reason_for_call == DLL_PROCESS_DETACH) {
+        LogInfo("DllMain: DLL_PROCESS_DETACH. Unloading...");
+
+        // Unregister DLL notification callback
+        HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+        if (hNtDll && g_ldrCookie) {
+            auto pLdrUnregisterDllNotification = reinterpret_cast<PLDR_UNREGISTER_DLL_NOTIFICATION>(
+                GetProcAddress(hNtDll, "LdrUnregisterDllNotification")
+            );
+            if (pLdrUnregisterDllNotification) {
+                pLdrUnregisterDllNotification(g_ldrCookie);
+            }
+        }
+
+        // Signal sender thread to exit and wait
+        g_exitSender = true;
+        g_queueCv.notify_all();
+        if (g_hSenderThread.IsValid()) {
+            WaitForSingleObject(g_hSenderThread.Get(), 1000);
+            g_hSenderThread.Close();
+        }
+
+        MH_DisableHook(MH_ALL_HOOKS);
+        MH_Uninitialize();
+        LogInfo("DllMain: Hook uninstalled, agent detached.");
+    }
+    return TRUE;
+}

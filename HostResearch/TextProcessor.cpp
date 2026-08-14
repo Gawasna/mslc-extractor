@@ -6,14 +6,19 @@
 #include <mutex>
 #include <cwctype>
 
-#include "HostLogger.h"
-#include "ConsoleRenderer.h"
-#include "AppConfig.h"
+// External functions defined in Host.cpp
+extern void LogHost(const char* category, const std::string& msg);
+extern std::string TruncateForLog(const std::wstring& ws, size_t maxChars = 60);
+extern void ClearLiveText();
+extern void PrintLiveText(const std::wstring& text);
+extern void EmitTranslateCommit(const std::wstring& type, const std::wstring& text, uint64_t offset, uint64_t duration, DWORD64 ts_ms);
+extern void FormatTimestamp(DWORD64 ts_ms, wchar_t* buf, size_t bufLen);
 
-DWORD64 g_pktCount = 0;
-DWORD64 g_totalBytes = 0;
-DWORD64 g_lastDelayMs = 0;
-wchar_t g_lastTs[20] = L"--:--:--";
+// External stats variables defined in Host.cpp
+extern DWORD64 g_pktCount;
+extern DWORD64 g_totalBytes;
+extern DWORD64 g_lastDelayMs;
+extern wchar_t g_lastTs[20];
 
 // Global instances
 SentenceSplitter g_splitter;
@@ -268,27 +273,6 @@ static bool HasAlnum(const std::wstring& s) {
         if (wc > 0x7F || iswalnum(wc)) return true;
     }
     return false;
-}
-
-// =============================================================
-// TRANSLATION EMISSION
-// =============================================================
-void EmitTranslateCommit(const std::wstring& type, const std::wstring& text, uint64_t offset, uint64_t duration, DWORD64 ts_ms) {
-    g_transSegmenter.segment_id++;
-    double offset_sec = static_cast<double>(offset) / 10000000.0;
-    double duration_sec = static_cast<double>(duration) / 10000000.0;
-    
-    ClearLiveText();
-    
-    std::cout << "[TRANSLATE_COMMIT] [" << WideToUTF8(type) << "] " << g_transSegmenter.segment_id << ". " << WideToUTF8(text)
-              << " (offset: " << std::fixed << std::setprecision(2) << offset_sec << "s"
-              << ", duration: " << duration_sec << "s"
-              << ", ts: " << ts_ms << ")"
-              << std::endl;
-              
-    std::string narrowText(text.begin(), text.end());
-    std::string narrowType(type.begin(), type.end());
-    LogHost("TRANSLATE", "[" + narrowType + "] Segment " + std::to_string(g_transSegmenter.segment_id) + ": " + narrowText);
 }
 
 // =============================================================

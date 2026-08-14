@@ -22,3 +22,8 @@ AGENTS.md
 TRACE.md
 *.log
 /docs_shared
+/.agents
+*.ps1
+/tests
+This is worse than pure spiciness.mp3
+/docs
