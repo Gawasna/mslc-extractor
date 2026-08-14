@@ -1,9 +1,11 @@
-name: Build x64 Release
+name: Build x64
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [master, dev]
+    tags: ['v*']
+  pull_request:
+    branches: [master, dev]
   workflow_dispatch:
 
 permissions:
@@ -12,9 +14,67 @@ permissions:
   packages: write
   attestations: write
 
+# Cancel in-progress runs on the same ref to avoid wasted runners
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  # ---------------------------------------------------------------
+  # CI: compile-check on every push / PR
+  # ---------------------------------------------------------------
+  ci-build:
+    name: CI — Build & Verify
     runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore Native.sln
+
+      - name: Build Release x64
+        run: msbuild Native.sln /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Build Debug x64
+        # Catches issues in Debug config (e.g. missing include paths, PCH errors)
+        run: msbuild Native.sln /m /p:Configuration=Debug /p:Platform=x64
+
+      - name: Verify build outputs (Release)
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          $minSizeKB = 10
+          $required = @('Host.exe', 'Agent.dll')
+          foreach ($file in $required) {
+            $path = Join-Path $out $file
+            if (-not (Test-Path $path)) {
+              Write-Error "Required output not found: $path"
+              exit 1
+            }
+            $sizeKB = [math]::Round((Get-Item $path).Length / 1KB, 1)
+            if ($sizeKB -lt $minSizeKB) {
+              Write-Error "$file is suspiciously small: ${sizeKB} KB (expected >= ${minSizeKB} KB)"
+              exit 1
+            }
+            Write-Host "OK: $file (${sizeKB} KB)"
+          }
+
+  # ---------------------------------------------------------------
+  # CD: package + attest + release — only on version tags
+  # ---------------------------------------------------------------
+  cd-release:
+    name: CD — Release
+    runs-on: windows-2022
+    needs: ci-build
+    if: startsWith(github.ref, 'refs/tags/v')
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,12 +82,11 @@ jobs:
           fetch-depth: 0
 
       - name: Verify tag is on master branch
-        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $isOnMaster = git branch -r --contains ${{ github.sha }} | Select-String "origin/master"
           if (-not $isOnMaster) {
-            Write-Error "This tag commit does not belong to the master branch. Releases are only allowed from master."
+            Write-Error "Tag commit is not on master. Releases are only allowed from master."
             exit 1
           }
 
@@ -35,26 +94,29 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet packages
-        # nuget restore resolves the native MinHook package committed under packages/.
-        # If the packages/ folder is present in the repo, nuget reads packages.config
-        # and skips downloading; this step is kept for correctness and future packages.
         run: nuget restore Native.sln
 
-      - name: Build solution (x64 Release)
+      - name: Build Release x64
         run: msbuild Native.sln /m /p:Configuration=Release /p:Platform=x64
 
-      - name: Verify build outputs exist
+      - name: Verify build outputs
         shell: pwsh
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          $minSizeKB = 10
           $required = @('Host.exe', 'Agent.dll')
           foreach ($file in $required) {
             $path = Join-Path $out $file
             if (-not (Test-Path $path)) {
-              Write-Error "Required build output not found: $path"
+              Write-Error "Required output not found: $path"
               exit 1
             }
-            Write-Host "OK: $file ($([math]::Round((Get-Item $path).Length / 1KB, 1)) KB)"
+            $sizeKB = [math]::Round((Get-Item $path).Length / 1KB, 1)
+            if ($sizeKB -lt $minSizeKB) {
+              Write-Error "$file is suspiciously small: ${sizeKB} KB"
+              exit 1
+            }
+            Write-Host "OK: $file (${sizeKB} KB)"
           }
 
       - name: Create SHA256SUMS.txt
@@ -69,24 +131,22 @@ jobs:
               $h = Get-FileHash $_.FullName -Algorithm SHA256
               "{0}  {1}" -f $h.Hash.ToLower(), $_.Name
             } | Out-File -FilePath $sumfile -Encoding ASCII
-          Write-Host "Checksums written to $sumfile"
+          Write-Host "Checksums:"
           Get-Content $sumfile
 
-      - name: Package release artifacts (zip)
+      - name: Package release artifacts
         shell: pwsh
         run: |
-          $out = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
-          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "manual" }
-          $zipName = "mslc-extractor-$tag-win-x64.zip"
-          # Use the workspace root (forward-slash safe) as staging location to
-          # avoid putting the zip inside the folder being zipped.
-          $zipPath = Join-Path $env:GITHUB_WORKSPACE $zipName
-          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-          Compress-Archive -Path "$out\Host.exe", "$out\Agent.dll", "$out\SHA256SUMS.txt" -DestinationPath $zipPath -Force
-          # Write env vars using relative paths and Add-Content for cross-shell safety and BOM prevention.
-          Add-Content -Path $env:GITHUB_ENV -Value "ZIP_NAME=$zipName"
-          Add-Content -Path $env:GITHUB_ENV -Value "ZIP_PATH=$zipName"
-          Write-Host "Created artifact: $zipName at $zipPath"
+          $out  = Join-Path $env:GITHUB_WORKSPACE 'x64\Release'
+          $tag  = "${{ github.ref_name }}"
+          $name = "mslc-extractor-$tag-win-x64.zip"
+          $dest = Join-Path $env:GITHUB_WORKSPACE $name
+          if (Test-Path $dest) { Remove-Item $dest -Force }
+          Compress-Archive -Path "$out\Host.exe", "$out\Agent.dll", "$out\SHA256SUMS.txt" `
+                           -DestinationPath $dest -Force
+          Add-Content -Path $env:GITHUB_ENV -Value "ZIP_NAME=$name"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZIP_PATH=$name"
+          Write-Host "Created: $name"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
@@ -98,30 +158,29 @@ jobs:
             x64/Release/SHA256SUMS.txt
             ${{ env.ZIP_PATH }}
 
-      - name: Upload build artifact (Actions UI)
+      - name: Upload artifact (Actions UI)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_PATH }}
 
-      - name: Create GitHub release (from tag) and attach zip
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           allowUpdates: true
           body: |
-            ### Binaries Details
+            ### Binaries
             - **Platform**: Windows x64
             - **Version**: ${{ github.ref_name }}
-            - **Build Run**: [View Process](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            
-            **Security Verification:**
-            - Verify SHA256 checksums in the `SHA256SUMS.txt` inside the zip.
-            - This build is verified with **GitHub Artifact Attestations** (check the link above).
-            
-            > **Note**: Anti-virus software may flag these files due to the memory hooking techniques used to extract text.
+            - **Build**: [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            **Security:**
+            - Verify checksums via `SHA256SUMS.txt` inside the zip.
+            - Build provenance attested via GitHub Artifact Attestations.
+
+            > **Note**: Anti-virus software may flag these files due to memory hooking techniques used to extract text.
           artifacts: ${{ env.ZIP_PATH }}
           token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
