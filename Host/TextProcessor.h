@@ -58,5 +58,6 @@ extern std::mutex g_csMutex;
 std::string WideToUTF8(const std::wstring& wstr);
 
 void ProcessTranslationAndSplitting(const std::wstring& pktText, bool isFinal, uint64_t offset, uint64_t duration, DWORD64 tsMs, DWORD64 recvTick, DWORD64 delayMs, DWORD64 pktBytes, const std::wstring& resultId);
+void EmitTranslateCommit(const std::wstring& type, const std::wstring& text, uint64_t offset, uint64_t duration, DWORD64 ts_ms);
 void CheckSilenceTimeout(DWORD64 now);
 void CheckSilenceTimeoutLocked(DWORD64 now);

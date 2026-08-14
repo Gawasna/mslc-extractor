@@ -144,10 +144,24 @@
     <ClInclude Include="HeapScanner.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="AgentLogger.h" />
+    <ClInclude Include="SafeHandle.h" />
+    <ClInclude Include="NtDecls.h" />
+    <ClInclude Include="ModuleUtils.h" />
+    <ClInclude Include="JsonBuilder.h" />
+    <ClInclude Include="PipeSender.h" />
+    <ClInclude Include="SdkHooks.h" />
+    <ClInclude Include="DllWatcher.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="HeapScanner.cpp" />
+    <ClCompile Include="AgentLogger.cpp" />
+    <ClCompile Include="ModuleUtils.cpp" />
+    <ClCompile Include="JsonBuilder.cpp" />
+    <ClCompile Include="PipeSender.cpp" />
+    <ClCompile Include="SdkHooks.cpp" />
+    <ClCompile Include="DllWatcher.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>

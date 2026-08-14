@@ -5,15 +5,9 @@
 #include <iomanip>
 #include <algorithm>
 
-// External declarations from dllmain.cpp
-extern void LogToFile(const char* level, const std::string& msg);
-extern void PushToQueue(const std::string& payload);
-extern HMODULE FindModuleByPartialName(const std::string& partialName);
-extern uint64_t GetPreciseTimeTicks();
-
-static void LogInfo(const std::string& msg) { LogToFile("INFO ", msg); }
-static void LogWarn(const std::string& msg) { LogToFile("WARN ", msg); }
-static void LogError(const std::string& msg) { LogToFile("ERROR", msg); }
+#include "AgentLogger.h"
+#include "PipeSender.h"
+#include "ModuleUtils.h"
 
 static std::string AddressToHexString(uintptr_t addr) {
     std::ostringstream ss;

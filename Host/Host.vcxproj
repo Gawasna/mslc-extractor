@@ -128,6 +128,10 @@
     <ClCompile Include="Host.cpp" />
     <ClCompile Include="Injector.cpp" />
     <ClCompile Include="TextProcessor.cpp" />
+    <ClCompile Include="HostLogger.cpp" />
+    <ClCompile Include="AppConfig.cpp" />
+    <ClCompile Include="ConsoleRenderer.cpp" />
+    <ClCompile Include="PipeServer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Host.rc" />
@@ -137,6 +141,12 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="Injector.h" />
     <ClInclude Include="TextProcessor.h" />
+    <ClInclude Include="SafeHandle.h" />
+    <ClInclude Include="HostLogger.h" />
+    <ClInclude Include="AppConfig.h" />
+    <ClInclude Include="ConsoleRenderer.h" />
+    <ClInclude Include="PacketParser.h" />
+    <ClInclude Include="PipeServer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

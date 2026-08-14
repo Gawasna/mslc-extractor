@@ -4,8 +4,7 @@
 #include <sddl.h>
 #include <memory>
 
-// Declare the external logger function implemented in Host.cpp
-extern void LogHost(const char* category, const std::string& msg);
+#include "HostLogger.h"
 
 bool SetAppContainerPermission(const std::wstring& filePath) {
     PACL pOldDACL = NULL, pNewDACL = NULL;
