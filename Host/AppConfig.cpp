@@ -1,4 +1,5 @@
 #include "AppConfig.h"
+#include "ProcessMonitor.h"
 #include <string>
 
 std::atomic<DWORD> g_targetPid{0};
@@ -10,6 +11,11 @@ bool               g_stdoutOnly = false;
 bool               g_noSpawn = false;
 bool               g_injectOnly = false;
 std::string        g_logPath = "";
+
+// Process lifecycle flags
+bool               g_watchMode    = false;
+bool               g_autoLaunch   = false;
+OnExitAction       g_onExitAction = OnExitAction::Quit;
 
 void ParseCliArgs(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
@@ -39,6 +45,15 @@ void ParseCliArgs(int argc, char* argv[]) {
             g_noSpawn = true;
         } else if (arg == "--inject-only") {
             g_injectOnly = true;
+        } else if (arg == "--watch") {
+            g_watchMode = true;
+        } else if (arg == "--auto-launch") {
+            g_autoLaunch = true;
+        } else if (arg == "--on-exit") {
+            if (i + 1 < argc) {
+                g_onExitAction = ParseOnExitAction(argv[++i]);
+            }
         }
     }
 }
+

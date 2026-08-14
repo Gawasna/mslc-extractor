@@ -132,6 +132,7 @@
     <ClCompile Include="AppConfig.cpp" />
     <ClCompile Include="ConsoleRenderer.cpp" />
     <ClCompile Include="PipeServer.cpp" />
+    <ClCompile Include="ProcessMonitor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Host.rc" />
@@ -147,6 +148,7 @@
     <ClInclude Include="ConsoleRenderer.h" />
     <ClInclude Include="PacketParser.h" />
     <ClInclude Include="PipeServer.h" />
+    <ClInclude Include="ProcessMonitor.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
