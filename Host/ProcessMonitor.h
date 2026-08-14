@@ -17,14 +17,10 @@ enum class HostExitCode : int {
     UserAborted       = 7,  // Ctrl+C / graceful signal
 };
 
-// ---------------------------------------------------------------
-// --on-exit policy when target process terminates
-// ---------------------------------------------------------------
-enum class OnExitAction {
-    Quit,     // exit with code ProcessExited(5)   [default]
-    Reinject, // wait for process to reappear by name, then reinject
-    Relaunch, // auto-launch a new instance + reinject
-};
+// OnExitAction is defined in AppConfig.h to avoid circular include.
+// ParseOnExitAction is implemented in ProcessMonitor.cpp.
+// Include AppConfig.h before this header to use OnExitAction.
+#include "AppConfig.h"
 
 // Parse "--on-exit" string to enum (case-insensitive).
 // Returns Quit for unknown values.

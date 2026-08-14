@@ -1,6 +1,7 @@
 #include "AppConfig.h"
-#include "ProcessMonitor.h"
 #include <string>
+#include <algorithm>
+#include <cctype>
 
 std::atomic<DWORD> g_targetPid{0};
 std::atomic<bool>  g_needReinjection{false};
@@ -16,6 +17,16 @@ std::string        g_logPath = "";
 bool               g_watchMode    = false;
 bool               g_autoLaunch   = false;
 OnExitAction       g_onExitAction = OnExitAction::Quit;
+
+// Defined here (not ProcessMonitor.cpp) to avoid circular include
+OnExitAction ParseOnExitAction(const std::string& s) {
+    std::string lo = s;
+    std::transform(lo.begin(), lo.end(), lo.begin(),
+                   [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    if (lo == "relaunch") return OnExitAction::Relaunch;
+    if (lo == "reinject") return OnExitAction::Reinject;
+    return OnExitAction::Quit;
+}
 
 void ParseCliArgs(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {

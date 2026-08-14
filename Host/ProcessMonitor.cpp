@@ -17,16 +17,6 @@ static constexpr const wchar_t* LC_SHELL_ALIAS =
     L"shell:AppsFolder\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy!LiveCaptions";
 
 // ---------------------------------------------------------------
-OnExitAction ParseOnExitAction(const std::string& s) {
-    std::string lo = s;
-    std::transform(lo.begin(), lo.end(), lo.begin(),
-                   [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-    if (lo == "relaunch") return OnExitAction::Relaunch;
-    if (lo == "reinject") return OnExitAction::Reinject;
-    return OnExitAction::Quit; // default + unknown
-}
-
-// ---------------------------------------------------------------
 std::vector<DWORD> FindAllProcessInstances(const wchar_t* exeName) {
     std::vector<DWORD> pids;
 

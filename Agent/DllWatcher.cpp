@@ -3,6 +3,7 @@
 #include "AgentLogger.h"
 #include "SdkHooks.h"
 #include "ModuleUtils.h"
+#include <algorithm>
 
 PVOID g_ldrCookie = nullptr;
 std::atomic<bool> g_hookInstalled{false};
