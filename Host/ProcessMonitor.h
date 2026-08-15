@@ -44,6 +44,18 @@ std::vector<DWORD> FindAllProcessInstances(const wchar_t* exeName);
 bool LaunchLiveCaptions(DWORD* outPid);
 
 // ---------------------------------------------------------------
+// Resume all suspended threads of a process and attempt to
+// restore its window. Used after spawning AppContainer processes
+// (e.g. LiveCaptions) that launch headless from a non-UI context.
+//
+// Strategy:
+//   1. Enumerate threads via CreateToolhelp32Snapshot
+//   2. ResumeThread on each — idempotent if already running
+//   3. EnumWindows to find + ShowWindow(SW_RESTORE) the app window
+// ---------------------------------------------------------------
+void WakeupSuspendedProcess(DWORD pid);
+
+// ---------------------------------------------------------------
 // Block until pid exits OR g_exitHost is set.
 // Uses WaitForSingleObject (500ms poll) — no busy spin.
 // Returns true  if process exited naturally.

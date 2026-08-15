@@ -53,7 +53,7 @@ static DWORD CheckAndResolveDuplicates() {
         for (DWORD p : pids) pidList += std::to_string(p) + " ";
         LogHost("WARN", "Multiple LiveCaptions.exe instances detected: [" + pidList + "]. "
                         "Using first PID. Exit code 4 is non-fatal.");
-        if (!g_stdoutOnly)
+        if (!g_stdoutOnly && !g_silent)
             std::cout << "[!] WARNING: Multiple LiveCaptions.exe instances found ("
                       << pids.size() << "). Using PID " << pids.front() << ".\n";
     }
@@ -74,7 +74,7 @@ static DWORD AcquireTargetPid(HostExitCode& exitCode, bool& settingsOpened) {
 
     // Not found — decide how to proceed
     if (g_autoLaunch) {
-        if (!g_stdoutOnly && !g_injectOnly)
+        if (!g_stdoutOnly && !g_injectOnly && !g_silent)
             std::cout << "[*] LiveCaptions.exe not found. Attempting auto-launch...\n";
         DWORD newPid = 0;
         if (!LaunchLiveCaptions(&newPid)) {
@@ -82,6 +82,10 @@ static DWORD AcquireTargetPid(HostExitCode& exitCode, bool& settingsOpened) {
             exitCode = HostExitCode::LaunchFailed;
             return 0;
         }
+        // LiveCaptions launched by a non-UI parent often starts with suspended threads
+        // and no visible window (AppContainer + WDM initialization deferral).
+        // WakeupSuspendedProcess resumes those threads and attempts window restoration.
+        WakeupSuspendedProcess(newPid);
         return newPid;
     }
 
@@ -106,7 +110,7 @@ static bool InjectPhase(DWORD pid, const std::wstring& dllPath,
         if (IsDLLAlreadyInjected(pid, L"Agent.dll")) {
             LogHost("HOST", "Agent.dll already injected in PID " +
                     std::to_string(pid) + ". Reusing connection.");
-            if (!g_stdoutOnly && !g_injectOnly)
+            if (!g_stdoutOnly && !g_injectOnly && !g_silent)
                 std::cout << "[~] Agent already injected. Reusing...\n";
             g_needReinjection = false;
             return true;
@@ -123,7 +127,7 @@ static bool InjectPhase(DWORD pid, const std::wstring& dllPath,
         if (InjectDLL(pid, dllPath)) {
             LogHost("HOST", "Agent.dll injected successfully into PID " +
                     std::to_string(pid));
-            if (!g_stdoutOnly && !g_injectOnly)
+            if (!g_stdoutOnly && !g_injectOnly && !g_silent)
                 std::cout << "[+] Injection successful!\n";
             g_needReinjection = false;
             return true;
@@ -134,7 +138,7 @@ static bool InjectPhase(DWORD pid, const std::wstring& dllPath,
                 std::to_string(MAX_INJECT_RETRIES) + ")");
         if (++retries >= MAX_INJECT_RETRIES) {
             LogHost("HOST", "Max injection retries reached.");
-            if (!g_stdoutOnly)
+            if (!g_stdoutOnly && !g_silent)
                 std::cerr << "[-] Injection failed after " << MAX_INJECT_RETRIES
                           << " retries.\n";
             exitCode  = HostExitCode::InjectionFailed;
@@ -269,7 +273,7 @@ int main(int argc, char* argv[]) {
 
     // 6. Main lifecycle loop
     while (!g_exitHost) {
-        if (!g_stdoutOnly && !g_injectOnly)
+        if (!g_stdoutOnly && !g_injectOnly && !g_silent)
             std::cout << "[*] Waiting for LiveCaptions.exe...\n";
 
         // --- Phase A: Discover / launch target ---
@@ -287,7 +291,7 @@ int main(int argc, char* argv[]) {
         if (g_exitHost) break;
 
         g_targetPid = pid;
-        if (!g_stdoutOnly && !g_injectOnly)
+        if (!g_stdoutOnly && !g_injectOnly && !g_silent)
             std::cout << "[+] Found LiveCaptions.exe (PID: " << pid << ")\n";
         LogHost("HOST", "Target PID: " + std::to_string(pid));
 
@@ -300,7 +304,7 @@ int main(int argc, char* argv[]) {
         if (g_watchMode) {
             watcherThread = std::thread([pid, &exitCode]() {
                 bool exited = WatchProcessUntilExit(pid);
-                if (!exited || g_exitHost) return; // interrupted, not a natural exit
+                if (!exited || g_exitHost) return;
 
                 LogHost("HOST", "LiveCaptions.exe (PID " + std::to_string(pid) +
                         ") exited. --on-exit=" +
@@ -309,13 +313,12 @@ int main(int argc, char* argv[]) {
 
                 switch (g_onExitAction) {
                     case OnExitAction::Quit:
-                        exitCode  = HostExitCode::ProcessExited;
+                        exitCode   = HostExitCode::ProcessExited;
                         g_exitHost = true;
                         break;
                     case OnExitAction::Reinject:
                     case OnExitAction::Relaunch:
-                        // Signal outer loop to re-discover / re-launch
-                        g_targetPid      = 0;
+                        g_targetPid       = 0;
                         g_needReinjection = true;
                         break;
                 }
@@ -331,10 +334,10 @@ int main(int argc, char* argv[]) {
         // --- Phase E: Post-exit decision ---
         if (g_needReinjection && !g_exitHost) {
             if (g_onExitAction == OnExitAction::Relaunch && g_watchMode) {
-                // Auto-launch a fresh instance before looping
                 LogHost("HOST", "Relaunch: attempting to start new LiveCaptions instance.");
                 DWORD newPid = 0;
                 if (LaunchLiveCaptions(&newPid)) {
+                    WakeupSuspendedProcess(newPid); // handle headless AppContainer spawn
                     g_targetPid = newPid;
                 } else {
                     LogHost("HOST", "Relaunch failed. Falling back to re-discovery.");

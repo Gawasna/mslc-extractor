@@ -117,6 +117,77 @@ bool LaunchLiveCaptions(DWORD* outPid) {
 }
 
 // ---------------------------------------------------------------
+// Helper for EnumWindows: find any top-level window owned by pid
+struct WindowSearchCtx { DWORD pid; HWND hwnd; };
+
+static BOOL CALLBACK FindWindowByPid(HWND hwnd, LPARAM lParam) {
+    auto* ctx = reinterpret_cast<WindowSearchCtx*>(lParam);
+    DWORD windowPid = 0;
+    GetWindowThreadProcessId(hwnd, &windowPid);
+    if (windowPid == ctx->pid) {
+        ctx->hwnd = hwnd;
+        return FALSE; // stop — found one
+    }
+    return TRUE;
+}
+
+void WakeupSuspendedProcess(DWORD pid) {
+    if (pid == 0) return;
+
+    // --- Step 1: Resume all suspended threads ---
+    HANDLE snapThread = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    int resumedCount = 0;
+
+    if (snapThread != INVALID_HANDLE_VALUE) {
+        THREADENTRY32 te = { sizeof(te) };
+        if (Thread32First(snapThread, &te)) {
+            do {
+                if (te.th32OwnerProcessID != pid) continue;
+
+                SafeHandle hThread(OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID));
+                if (!hThread.IsValid()) continue;
+
+                // ResumeThread returns previous suspend count.
+                // Keep calling until it reaches 0 (fully resumed).
+                DWORD suspendCount = ResumeThread(hThread.Get());
+                while (suspendCount > 1) {
+                    suspendCount = ResumeThread(hThread.Get());
+                }
+                if (suspendCount > 0) ++resumedCount;
+
+            } while (Thread32Next(snapThread, &te));
+        }
+        CloseHandle(snapThread);
+    }
+
+    if (resumedCount > 0) {
+        LogHost("LAUNCH", "WakeupSuspendedProcess: resumed " +
+                std::to_string(resumedCount) + " thread(s) in PID " + std::to_string(pid));
+    } else {
+        LogHost("LAUNCH", "WakeupSuspendedProcess: no suspended threads found in PID " +
+                std::to_string(pid));
+    }
+
+    // --- Step 2: Allow threads to initialize ---
+    Sleep(500);
+
+    // --- Step 3: Find + restore window ---
+    // Note: AppContainer windows may not be visible to EnumWindows from
+    // medium-integrity context — this is best-effort.
+    WindowSearchCtx ctx = { pid, NULL };
+    EnumWindows(FindWindowByPid, reinterpret_cast<LPARAM>(&ctx));
+
+    if (ctx.hwnd) {
+        ShowWindow(ctx.hwnd, SW_RESTORE);
+        SetForegroundWindow(ctx.hwnd);
+        LogHost("LAUNCH", "WakeupSuspendedProcess: restored window HWND=" +
+                std::to_string(reinterpret_cast<uintptr_t>(ctx.hwnd)));
+    } else {
+        LogHost("LAUNCH", "WakeupSuspendedProcess: no window found (AppContainer isolation expected).");
+    }
+}
+
+// ---------------------------------------------------------------
 bool WatchProcessUntilExit(DWORD pid) {
     SafeHandle shProc(OpenProcess(
         SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
