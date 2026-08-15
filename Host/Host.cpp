@@ -253,9 +253,7 @@ int main(int argc, char* argv[]) {
 
     LogHost("SESSION", "=== Host started ==="
             + std::string(g_watchMode   ? " [--watch]"       : "")
-            + std::string(g_autoLaunch  ? " [--auto-launch]"  : "")
-            + (g_onExitAction == OnExitAction::Relaunch ? " [--on-exit=relaunch]" :
-               g_onExitAction == OnExitAction::Reinject ? " [--on-exit=reinject]" : ""));
+            + (g_onExitAction == OnExitAction::Reinject ? " [--on-exit=reinject]" : ""));
 
     if (!g_stdoutOnly && !g_injectOnly)
         SetConsoleOutputCP(CP_UTF8);
@@ -310,8 +308,7 @@ int main(int argc, char* argv[]) {
 
                 LogHost("HOST", "LiveCaptions.exe (PID " + std::to_string(pid) +
                         ") exited. --on-exit=" +
-                        (g_onExitAction == OnExitAction::Relaunch ? "relaunch" :
-                         g_onExitAction == OnExitAction::Reinject ? "reinject" : "quit"));
+                        (g_onExitAction == OnExitAction::Reinject ? "reinject" : "quit"));
 
                 switch (g_onExitAction) {
                     case OnExitAction::Quit:
@@ -319,7 +316,6 @@ int main(int argc, char* argv[]) {
                         g_exitHost = true;
                         break;
                     case OnExitAction::Reinject:
-                    case OnExitAction::Relaunch:
                         g_targetPid       = 0;
                         g_needReinjection = true;
                         break;
