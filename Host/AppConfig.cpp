@@ -12,7 +12,9 @@ bool               g_injectOnly    = false;
 
 // -- Process lifecycle
 bool               g_watchMode     = false;
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
 bool               g_autoLaunch    = false;
+#endif
 OnExitAction       g_onExitAction  = OnExitAction::Quit;
 
 // -- Logging
@@ -59,7 +61,9 @@ OnExitAction ParseOnExitAction(const std::string& s) {
     std::string lo = s;
     std::transform(lo.begin(), lo.end(), lo.begin(),
                    [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
     if (lo == "relaunch") return OnExitAction::Relaunch;
+#endif
     if (lo == "reinject") return OnExitAction::Reinject;
     return OnExitAction::Quit;
 }
@@ -88,8 +92,10 @@ void ParseCliArgs(int argc, char* argv[]) {
         // -- Process lifecycle
         } else if (arg == "--watch") {
             g_watchMode = true;
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
         } else if (arg == "--auto-launch") {
             g_autoLaunch = true;
+#endif
         } else if (arg == "--on-exit") {
             if (i + 1 < argc) g_onExitAction = ParseOnExitAction(argv[++i]);
 

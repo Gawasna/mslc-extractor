@@ -73,6 +73,7 @@ static DWORD AcquireTargetPid(HostExitCode& exitCode, bool& settingsOpened) {
     if (!pids.empty()) return pids.front();
 
     // Not found — decide how to proceed
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
     if (g_autoLaunch) {
         if (!g_stdoutOnly && !g_injectOnly && !g_silent)
             std::cout << "[*] LiveCaptions.exe not found. Attempting auto-launch...\n";
@@ -88,6 +89,7 @@ static DWORD AcquireTargetPid(HostExitCode& exitCode, bool& settingsOpened) {
         WakeupSuspendedProcess(newPid);
         return newPid;
     }
+#endif
 
     // Open Settings page once to prompt user to enable Live Captions
     if (!g_noSpawn && !settingsOpened) {
@@ -333,6 +335,7 @@ int main(int argc, char* argv[]) {
 
         // --- Phase E: Post-exit decision ---
         if (g_needReinjection && !g_exitHost) {
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
             if (g_onExitAction == OnExitAction::Relaunch && g_watchMode) {
                 LogHost("HOST", "Relaunch: attempting to start new LiveCaptions instance.");
                 DWORD newPid = 0;
@@ -344,8 +347,11 @@ int main(int argc, char* argv[]) {
                     g_targetPid = 0;
                 }
             } else {
+#endif
                 g_targetPid = 0;
+#if 0
             }
+#endif
             g_needReinjection = false;
         }
     }

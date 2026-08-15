@@ -32,6 +32,7 @@ OnExitAction ParseOnExitAction(const std::string& s);
 // ---------------------------------------------------------------
 std::vector<DWORD> FindAllProcessInstances(const wchar_t* exeName);
 
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
 // ---------------------------------------------------------------
 // Launch LiveCaptions.exe.
 // Strategy (in order):
@@ -54,6 +55,7 @@ bool LaunchLiveCaptions(DWORD* outPid);
 //   3. EnumWindows to find + ShowWindow(SW_RESTORE) the app window
 // ---------------------------------------------------------------
 void WakeupSuspendedProcess(DWORD pid);
+#endif // 0
 
 // ---------------------------------------------------------------
 // Block until pid exits OR g_exitHost is set.

@@ -39,6 +39,7 @@ std::vector<DWORD> FindAllProcessInstances(const wchar_t* exeName) {
     return pids;
 }
 
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
 // ---------------------------------------------------------------
 // Internal: wait LAUNCH_SETTLE_MS then probe snapshot for first PID.
 static DWORD ProbeAfterLaunch() {
@@ -186,6 +187,7 @@ void WakeupSuspendedProcess(DWORD pid) {
         LogHost("LAUNCH", "WakeupSuspendedProcess: no window found (AppContainer isolation expected).");
     }
 }
+#endif // 0
 
 // ---------------------------------------------------------------
 bool WatchProcessUntilExit(DWORD pid) {

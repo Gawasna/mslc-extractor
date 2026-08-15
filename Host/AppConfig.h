@@ -25,7 +25,9 @@ std::string LogLevelToString(LogLevel lv);
 enum class OnExitAction {
     Quit,     // exit with HostExitCode::ProcessExited (default)
     Reinject, // wait for process to reappear by name, then reinject
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
     Relaunch, // auto-launch a new instance + reinject
+#endif
 };
 
 OnExitAction ParseOnExitAction(const std::string& s);
@@ -43,7 +45,9 @@ extern bool               g_injectOnly;
 
 // -- Process lifecycle (new)
 extern bool               g_watchMode;
+#if 0 // DEPRECATED: AV evasion tactics. Auto-launch is now disabled.
 extern bool               g_autoLaunch;
+#endif
 extern OnExitAction       g_onExitAction;
 
 // -- Logging
