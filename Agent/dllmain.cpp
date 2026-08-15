@@ -8,6 +8,7 @@
 #include "PipeSender.h"
 #include "SdkHooks.h"
 #include "DllWatcher.h"
+#include "MinHook.h"
 
 HMODULE g_hModule = NULL;
 std::string g_logPath = "";

@@ -4,10 +4,11 @@
 #include "JsonBuilder.h"
 #include "PipeSender.h"
 #include "ModuleUtils.h"
+#include "HeapScanner.h"
 #include "MinHook.h"
 
-// External declarations to avoid pulling in HeapScanner.h since it has a circular dependency or just declare here
-extern DWORD WINAPI HeapScannerThread(LPVOID /*lpParam*/);
+// HeapScannerThread is defined later in this TU — forward-declare so HookThread can reference it
+static DWORD WINAPI HeapScannerThread(LPVOID lpParam);
 
 result_get_text_t      fpOriginalResultGetText      = nullptr;
 result_get_reason_t    fpOriginalResultGetReason    = nullptr;
@@ -193,9 +194,7 @@ DWORD WINAPI HeapScannerThread(LPVOID /*lpParam*/) {
     Sleep(2000);
     if (!g_sessionStartedEmitted.load()) {
         LogInfo("HeapScannerThread: session_started not yet emitted. Scanning heap...");
-        // Need to forward declare ScanHeapForRecognizerHandle
-        extern std::vector<struct HeapScanResult> ScanHeapForRecognizerHandle();
-        ScanHeapForRecognizerHandle();
+        ScanHeapForRecognizerHandle(); // declared in HeapScanner.h
     } else {
         LogInfo("HeapScannerThread: session_started already emitted via hook. Skipping scan.");
     }
